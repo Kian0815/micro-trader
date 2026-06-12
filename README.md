@@ -2,6 +2,27 @@
 
 Local-first paper-trading MVP built for a very small budget. It ingests crypto, ETF, and starter stock market data, scores news sentiment from RSS feeds, generates signals, and simulates trades with hard risk limits around a `30 EUR` account.
 
+Micro Trader is intentionally opinionated:
+
+- default to guarded paper trading
+- promote setups only after proof
+- make live trading hard to enable by accident
+- keep every decision inspectable from the UI and JSON APIs
+
+## Current focus
+
+- run continuously on a VM
+- prove one entry lane well enough for low-attention paper deployment
+- keep broker live execution blocked until the checklist, alerts, and rollback path are all explicit
+
+## Highlights
+
+- cross-asset coverage across `crypto`, `ETF`, and `stock`
+- setup scorecards and walk-forward evidence before unattended promotion
+- live deployment checklist with emergency stop
+- operator alert transport support for `telegram`, `webhook`, `slack`, `discord`, plus documented `whatsapp_bridge` and `signal_bridge` placeholders
+- VM-friendly FastAPI + Postgres + worker deployment
+
 ## Why this setup
 
 - `Docker Compose` keeps the Mac setup reproducible.
