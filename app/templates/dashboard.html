@@ -812,6 +812,76 @@
 
       <section class="panel">
         <div class="panel-head">
+          <h2>Launch Readiness</h2>
+          <a href="/api/launch-readiness">JSON</a>
+        </div>
+        <p class="mini-note">{{ launch_readiness.objective }}</p>
+        <div class="spotlight-metrics proof-metrics">
+          <article>
+            <span>Overall</span>
+            <strong class="status-badge status-{{ launch_readiness.overall_state }}">{{ launch_readiness.overall_state }}</strong>
+            <p class="mini-note">{{ launch_readiness.current_tier }}</p>
+          </article>
+          <article>
+            <span>Approved gates</span>
+            <strong>{{ launch_readiness.approved_gates }}</strong>
+            <p class="mini-note">Green and structurally clear</p>
+          </article>
+          <article>
+            <span>Watch gates</span>
+            <strong>{{ launch_readiness.watch_gates }}</strong>
+            <p class="mini-note">Need more proof or recency</p>
+          </article>
+          <article>
+            <span>Blocked gates</span>
+            <strong>{{ launch_readiness.blocked_gates }}</strong>
+            <p class="mini-note">Red blockers still active</p>
+          </article>
+          <article>
+            <span>Low-attention paper</span>
+            <strong class="status-badge status-{{ 'ready' if launch_readiness.can_deploy_low_attention else 'watch' }}">{{ 'ready' if launch_readiness.can_deploy_low_attention else 'not yet' }}</strong>
+            <p class="mini-note">Unattended paper on VM</p>
+          </article>
+          <article>
+            <span>Real money</span>
+            <strong class="status-badge status-{{ 'ready' if launch_readiness.can_deploy_real_money else 'disabled' }}">{{ 'ready' if launch_readiness.can_deploy_real_money else 'blocked' }}</strong>
+            <p class="mini-note">Deliberately stricter gate</p>
+          </article>
+        </div>
+        <div class="alert-stack">
+          <article class="alert-card alert-{{ 'success' if launch_readiness.overall_state == 'ready' else 'warn' }}">
+            <strong>{{ launch_readiness.overall_message }}</strong>
+            {% if launch_readiness.next_unlock %}
+            <p>Next unlock: {{ launch_readiness.next_unlock }}</p>
+            {% endif %}
+          </article>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Gate</th>
+              <th>Status</th>
+              <th>Summary</th>
+              <th>Why it matters now</th>
+              <th>Next unlock</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for gate in launch_readiness.gates %}
+            <tr>
+              <td>{{ gate.title }}</td>
+              <td><span class="status-badge status-{{ gate.status }}">{{ gate.status }}</span></td>
+              <td>{{ gate.summary }}</td>
+              <td>{{ gate.detail }}</td>
+              <td>{{ gate.next_step }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
           <h2>Setup Proof</h2>
           <a href="/api/setups/scorecards">JSON</a>
         </div>

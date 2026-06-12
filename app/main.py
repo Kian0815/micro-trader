@@ -48,6 +48,7 @@ from app.models import (
 from app.schemas import (
     ActiveDemoPositionOut,
     ApprovalFocusReportOut,
+    LaunchReadinessReportOut,
     AssetOut,
     BenchmarkReportOut,
     BrokerCapabilitiesOut,
@@ -266,6 +267,16 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     risk_snapshot = build_risk_engine().control_snapshot(db)
     autopilot_status = _autopilot_status(signals, latest_market, provider_health, risk_snapshot)
     simulation_trigger_status = _simulation_trigger_status(active_simulation, best_opportunity, autopilot_status)
+    launch_readiness = _launch_readiness_summary(
+        latest_engine_run=latest_engine_run,
+        provider_health=provider_health,
+        setup_monitor=setup_monitor,
+        approval_focus=approval_focus,
+        reconciliation_status=reconciliation_status,
+        broker_status=broker_status,
+        risk_snapshot=risk_snapshot,
+        autopilot_status=autopilot_status,
+    )
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -314,6 +325,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             "best_opportunity": best_opportunity,
             "setup_monitor": setup_monitor,
             "approval_focus": approval_focus,
+            "launch_readiness": launch_readiness,
             "setup_scorecards": setup_scorecards,
             "setup_walkforward": setup_walkforward,
             "benchmark_report": benchmark_report,
@@ -338,6 +350,7 @@ def live_monitor(request: Request, db: Session = Depends(get_db)):
     ).all()
     latest_market = _latest_market_rows(db, assets)
     latest_signal_at = signals[0].created_at if signals else None
+    latest_engine_run = engine_runs[0] if engine_runs else None
     provider_health = _provider_health_summary(db)
     provider_audit = _provider_audit(provider_health)
     performance_report = _performance_report(db, build_portfolio_service().starting_capital_eur)
@@ -365,6 +378,17 @@ def live_monitor(request: Request, db: Session = Depends(get_db)):
     autopilot_status = _autopilot_status(signals, latest_market, provider_health, risk_snapshot)
     simulation_trigger_status = _simulation_trigger_status(build_simulation_service().get_active(db), best_opportunity, autopilot_status)
     reconciliation_status = build_reconciliation_service().snapshot(db)
+    broker_status = build_broker_adapter(settings).status()
+    launch_readiness = _launch_readiness_summary(
+        latest_engine_run=latest_engine_run,
+        provider_health=provider_health,
+        setup_monitor=setup_monitor,
+        approval_focus=approval_focus,
+        reconciliation_status=reconciliation_status,
+        broker_status=broker_status,
+        risk_snapshot=risk_snapshot,
+        autopilot_status=autopilot_status,
+    )
     return templates.TemplateResponse(
         request,
         "live.html",
@@ -395,6 +419,7 @@ def live_monitor(request: Request, db: Session = Depends(get_db)):
             "best_opportunity": best_opportunity,
             "setup_monitor": setup_monitor,
             "approval_focus": approval_focus,
+            "launch_readiness": launch_readiness,
             "setup_scorecards": setup_scorecards,
             "setup_walkforward": setup_walkforward,
             "benchmark_report": benchmark_report,
@@ -601,6 +626,49 @@ def get_setup_focus(db: Session = Depends(get_db)):
     walkforward = build_walkforward_service().build_report(db).to_dict()
     best_opportunity = build_opportunity_selector().summary(db)
     return ApprovalFocusReportOut(**_approval_focus_summary(scorecards, walkforward, pending, best_opportunity))
+
+
+@app.get("/api/launch-readiness", response_model=LaunchReadinessReportOut)
+def get_launch_readiness(db: Session = Depends(get_db)):
+    assets = db.scalars(select(Asset).order_by(Asset.symbol)).all()
+    signals = _latest_signals(db, limit=20)
+    latest_market = _latest_market_rows(db, assets)
+    provider_health = _provider_health_summary(db)
+    pending_setups = _pending_setup_summary(db)
+    best_opportunity = build_opportunity_selector().summary(db, signals=signals)
+    setup_scorecards = _split_setup_rows(build_strategy_proof_service().build_scorecard(db).to_dict())
+    setup_walkforward = _split_setup_rows(build_walkforward_service().build_report(db).to_dict())
+    board_focus = _apply_etf_regime_focus(
+        best_opportunity=best_opportunity,
+        pending_setups=pending_setups,
+        setup_scorecards=setup_scorecards,
+        setup_walkforward=setup_walkforward,
+        strategy_diagnostics=_strategy_diagnostics(signals, latest_market),
+    )
+    setup_monitor = _setup_monitor_summary(board_focus["setup_walkforward"], board_focus["pending_setups"], best_opportunity)
+    approval_focus = _approval_focus_summary(
+        board_focus["setup_scorecards"],
+        board_focus["setup_walkforward"],
+        board_focus["pending_setups"],
+        best_opportunity,
+    )
+    reconciliation_status = build_reconciliation_service().snapshot(db)
+    broker_status = build_broker_adapter(settings).status()
+    risk_snapshot = build_risk_engine().control_snapshot(db)
+    autopilot_status = _autopilot_status(signals, latest_market, provider_health, risk_snapshot)
+    latest_engine_run = db.scalar(select(EngineRun).order_by(EngineRun.completed_at.desc()).limit(1))
+    return LaunchReadinessReportOut(
+        **_launch_readiness_summary(
+            latest_engine_run=latest_engine_run,
+            provider_health=provider_health,
+            setup_monitor=setup_monitor,
+            approval_focus=approval_focus,
+            reconciliation_status=reconciliation_status,
+            broker_status=broker_status,
+            risk_snapshot=risk_snapshot,
+            autopilot_status=autopilot_status,
+        )
+    )
 
 
 @app.get("/api/opportunity/best")
@@ -2121,6 +2189,333 @@ def _simulation_trigger_status(active_simulation: StrategySimulation | None, bes
         "state": "watch",
         "headline": "Simulation trigger is armed and waiting for a fresh approved BUY.",
         "detail": "The worker is scanning crypto, ETF, and stock lanes every cycle, but no current setup is eligible yet.",
+    }
+
+
+def _launch_readiness_summary(
+    *,
+    latest_engine_run: EngineRun | None,
+    provider_health: dict,
+    setup_monitor: dict,
+    approval_focus: dict,
+    reconciliation_status,
+    broker_status,
+    risk_snapshot: dict,
+    autopilot_status: dict,
+) -> dict:
+    gates: list[dict] = []
+
+    def add_gate(
+        key: str,
+        title: str,
+        status: str,
+        summary: str,
+        detail: str,
+        next_step: str,
+    ) -> None:
+        gates.append(
+            {
+                "key": key,
+                "title": title,
+                "status": status,
+                "summary": summary,
+                "detail": detail,
+                "next_step": next_step,
+            }
+        )
+
+    ready_setups = int(setup_monitor.get("ready_setups_count", 0) or 0)
+    building_live = int(setup_monitor.get("building_live_count", 0) or 0)
+    pending_count = int(approval_focus.get("pending_count", 0) or 0)
+    live_proof_status = (approval_focus.get("live_proof_status") or "").lower()
+    evidence_status = (approval_focus.get("evidence_status") or "").lower()
+    latest_by_kind = provider_health.get("latest_by_kind", {})
+    relevant_kinds = sorted(settings.tradeable_asset_kinds | settings.simulation_asset_kinds)
+    coverage = autopilot_status.get("coverage", {})
+    min_coverage_pct = settings.min_data_coverage_ratio * 100
+
+    if ready_setups > 0:
+        add_gate(
+            "strategy_proof",
+            "Strategy proof",
+            "ready",
+            f"{ready_setups} lane(s) already cleared the proof gates.",
+            "At least one setup has enough scorecard and walk-forward evidence to be considered for unattended paper deployment.",
+            "Keep monitoring outcome quality and protect the approved lane from regression.",
+        )
+    elif building_live > 0 or approval_focus.get("target_setup"):
+        add_gate(
+            "strategy_proof",
+            "Strategy proof",
+            "watch",
+            "The board has a nearest candidate, but it is not approved yet.",
+            approval_focus.get("headline") or "A candidate lane exists, but it still needs stronger proof before promotion.",
+            "Accumulate more resolved outcomes and improve expectancy until one entry lane moves from watch to approved.",
+        )
+    else:
+        add_gate(
+            "strategy_proof",
+            "Strategy proof",
+            "disabled",
+            "No entry lane is close to approval right now.",
+            "The strategy board does not currently show a near-term candidate that is close to unattended readiness.",
+            "Focus the system on one lane and keep collecting cleaner resolved outcomes until a real candidate emerges.",
+        )
+
+    if live_proof_status in {"ready", "approved"}:
+        add_gate(
+            "live_evidence",
+            "Live evidence",
+            "ready",
+            "The active candidate has enough fresh live proof.",
+            approval_focus.get("evidence_message") or "Fresh live outcomes are flowing and the current candidate has passed the live-proof gate.",
+            "Continue validating that live behavior remains stable across more market regimes.",
+        )
+    elif evidence_status == "building_live" or pending_count > 0:
+        add_gate(
+            "live_evidence",
+            "Live evidence",
+            "watch",
+            f"{pending_count} outcome window(s) are still resolving.",
+            approval_focus.get("evidence_message") or "The app is still waiting for open outcome windows to resolve before the lane can earn live approval.",
+            "Leave the VM running continuously so pending outcome windows can resolve into fresh live proof.",
+        )
+    else:
+        add_gate(
+            "live_evidence",
+            "Live evidence",
+            "disabled",
+            "No candidate currently has live proof in flight.",
+            "The focused lane has neither approved live proof nor an active stream of pending outcomes building toward approval.",
+            "Generate fresh signals in the focus lane and keep the worker online long enough to convert them into resolved evidence.",
+        )
+
+    provider_problems: list[str] = []
+    weak_coverage: list[str] = []
+    for kind in relevant_kinds:
+        kind_coverage = float(coverage.get(kind, 0.0) or 0.0)
+        sample = latest_by_kind.get(kind)
+        if kind_coverage < min_coverage_pct:
+            weak_coverage.append(f"{kind} coverage {kind_coverage:.0f}%")
+        if sample and sample.status != "ok" and not (sample.cache_used and kind_coverage >= min_coverage_pct):
+            provider_problems.append(f"{kind} provider {sample.status}")
+        elif not sample:
+            provider_problems.append(f"{kind} provider unknown")
+
+    if not provider_problems and not weak_coverage:
+        add_gate(
+            "provider_reliability",
+            "Provider reliability",
+            "ready",
+            "All active universes have clean provider health and full usable coverage.",
+            "Quotes are arriving from the preferred provider path without stale-coverage issues across the configured trading and simulation universes.",
+            "Keep this path stable and add alerting before any future provider changes.",
+        )
+    elif provider_problems:
+        add_gate(
+            "provider_reliability",
+            "Provider reliability",
+            "disabled",
+            "A critical provider path is unhealthy.",
+            "; ".join(provider_problems + weak_coverage) if weak_coverage else "; ".join(provider_problems),
+            "Fix the failing provider path or reduce dependence on it before trusting unattended deployment.",
+        )
+    else:
+        add_gate(
+            "provider_reliability",
+            "Provider reliability",
+            "watch",
+            "Providers are up, but usable market-data coverage is still thinner than policy allows.",
+            "; ".join(weak_coverage),
+            "Improve fresh quote coverage until every active universe stays at or above the configured minimum.",
+        )
+
+    if reconciliation_status.status == "ok" and reconciliation_status.pending_intents == 0 and reconciliation_status.failed_intents == 0:
+        add_gate(
+            "execution_safety",
+            "Execution safety",
+            "ready",
+            "Ledger and execution plumbing are reconciled.",
+            reconciliation_status.message,
+            "Keep reconciliation checks green and investigate every mismatch immediately.",
+        )
+    elif reconciliation_status.status == "blocked" or reconciliation_status.failed_intents > 0:
+        add_gate(
+            "execution_safety",
+            "Execution safety",
+            "disabled",
+            "Execution controls are not clean enough for trustable unattended use.",
+            reconciliation_status.message,
+            "Clear broker or ledger mismatches and remove failed intents before promoting the platform.",
+        )
+    else:
+        add_gate(
+            "execution_safety",
+            "Execution safety",
+            "watch",
+            "Execution is mostly healthy, but there is still operational debt to clear.",
+            reconciliation_status.message,
+            "Wait for pending intents to settle and return reconciliation status to a clean ok state.",
+        )
+
+    interval_seconds = max(settings.worker_interval_seconds, 1)
+    if latest_engine_run:
+        age_seconds = max(int((datetime.utcnow() - latest_engine_run.completed_at).total_seconds()), 0)
+        recent_enough = age_seconds <= max(interval_seconds * 2, 600)
+    else:
+        age_seconds = None
+        recent_enough = False
+
+    if latest_engine_run and latest_engine_run.status == "ok" and recent_enough:
+        add_gate(
+            "ops_health",
+            "Ops health",
+            "ready",
+            "The engine is cycling normally on the VM.",
+            f"Last engine cycle completed successfully at {latest_engine_run.completed_at.strftime('%Y-%m-%d %H:%M:%S UTC')}.",
+            "Keep the stack supervised and add basic uptime + restart alerting around the worker and database.",
+        )
+    elif latest_engine_run and latest_engine_run.status != "ok":
+        add_gate(
+            "ops_health",
+            "Ops health",
+            "disabled",
+            "The latest engine cycle failed.",
+            latest_engine_run.message or "Engine cycle failed without a detailed message.",
+            "Fix the worker/runtime failure before treating this VM as trustable for low-attention use.",
+        )
+    else:
+        lag_note = (
+            f"Last engine cycle is stale by about {round(age_seconds / 60)} min."
+            if age_seconds is not None
+            else "No engine cycle has been recorded yet."
+        )
+        add_gate(
+            "ops_health",
+            "Ops health",
+            "watch",
+            "The runtime is up, but recency is not yet convincing.",
+            lag_note,
+            "Keep the worker running continuously and verify recent successful engine cycles over time.",
+        )
+
+    drawdown_lock_active = bool(risk_snapshot.get("drawdown_lock_active"))
+    drawdown_pct = float(risk_snapshot.get("drawdown_pct", 0.0) or 0.0)
+    if drawdown_lock_active:
+        add_gate(
+            "capital_protection",
+            "Capital protection",
+            "disabled",
+            "The drawdown lock is active.",
+            (
+                f"Current drawdown is {drawdown_pct:.2f}% and the portfolio protection layer has already locked new exposure."
+            ),
+            "Recover from the drawdown lock and keep risk controls green before adding unattended exposure.",
+        )
+    elif autopilot_status.get("state") == "ready":
+        add_gate(
+            "capital_protection",
+            "Capital protection",
+            "ready",
+            "Risk guardrails currently allow autonomous paper entries.",
+            autopilot_status.get("reasons", ["All guardrails passed."])[0],
+            "Preserve these guardrails and keep position sizing conservative while proof is still maturing.",
+        )
+    else:
+        add_gate(
+            "capital_protection",
+            "Capital protection",
+            "watch",
+            "Guardrails are doing their job, but they are still pausing new exposure.",
+            autopilot_status.get("reasons", ["Autopilot is currently paused."])[0],
+            "Clear the current guardrail blockers so the app can take approved entries without manual babysitting.",
+        )
+
+    broker_connected = bool(getattr(broker_status, "connected", False))
+    live_guard_ok = settings.broker_mode != "live" or settings.broker_live_confirmed
+    real_money_ready = (
+        bool(getattr(broker_status, "enabled", False))
+        and settings.broker_execution_target == "broker"
+        and settings.broker_mode == "live"
+        and settings.broker_live_confirmed
+        and broker_connected
+        and ready_setups > 0
+        and not drawdown_lock_active
+    )
+    if real_money_ready:
+        add_gate(
+            "real_money",
+            "Real-money eligibility",
+            "ready",
+            "The structure for real-money deployment is in place.",
+            "Broker execution is enabled, live mode is explicitly confirmed, a lane is approved, and the risk lock is clear.",
+            "Move to tiny-size capital only after a deliberate final review of fills, monitoring, and rollback handling.",
+        )
+    elif ready_setups > 0 and broker_connected and live_guard_ok:
+        add_gate(
+            "real_money",
+            "Real-money eligibility",
+            "watch",
+            "The platform is structurally close, but not yet cleared for real capital.",
+            (
+                f"Broker mode={settings.broker_mode}, execution_target={settings.broker_execution_target}, "
+                f"approved_lanes={ready_setups}, live_confirmed={settings.broker_live_confirmed}."
+            ),
+            "Keep using paper mode until the approved lane remains stable and you explicitly switch into broker live execution.",
+        )
+    else:
+        add_gate(
+            "real_money",
+            "Real-money eligibility",
+            "disabled",
+            "Real-money deployment is intentionally blocked.",
+            (
+                f"Broker connected={broker_connected}, execution_target={settings.broker_execution_target}, "
+                f"mode={settings.broker_mode}, approved_lanes={ready_setups}."
+            ),
+            "Do not deploy real money until a lane is approved and the broker path is deliberately configured for live execution.",
+        )
+
+    approved_gates = len([gate for gate in gates if gate["status"] == "ready"])
+    watch_gates = len([gate for gate in gates if gate["status"] == "watch"])
+    blocked_gates = len([gate for gate in gates if gate["status"] == "disabled"])
+    can_deploy_low_attention = ready_setups > 0 and blocked_gates == 0
+    can_deploy_real_money = any(gate["key"] == "real_money" and gate["status"] == "ready" for gate in gates)
+
+    if blocked_gates == 0 and watch_gates == 0:
+        overall_state = "ready"
+        current_tier = "live-capable" if can_deploy_real_money else "paper-on-vm"
+        overall_message = (
+            "All launch gates are green. The platform is structurally ready for low-attention operation, "
+            "with real-money eligibility controlled separately by the broker gate."
+        )
+    elif blocked_gates == 0:
+        overall_state = "watch"
+        current_tier = "paper-on-vm"
+        overall_message = (
+            "The VM is usable for continuous paper trading, but at least one gate still needs more proof before this is trustable for unattended capital."
+        )
+    else:
+        overall_state = "disabled"
+        current_tier = "guarded-paper"
+        overall_message = (
+            "At least one critical gate is red, so the platform should stay in guarded paper mode until the blockers are removed."
+        )
+
+    next_unlock = next((gate["next_step"] for gate in gates if gate["status"] != "ready"), None)
+    return {
+        "generated_at": datetime.utcnow(),
+        "objective": "Turn the VM system into a trustable low-attention investing platform.",
+        "overall_state": overall_state,
+        "overall_message": overall_message,
+        "current_tier": current_tier,
+        "approved_gates": approved_gates,
+        "watch_gates": watch_gates,
+        "blocked_gates": blocked_gates,
+        "can_deploy_low_attention": can_deploy_low_attention,
+        "can_deploy_real_money": can_deploy_real_money,
+        "next_unlock": next_unlock,
+        "gates": gates,
     }
 
 

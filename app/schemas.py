@@ -266,6 +266,30 @@ class ApprovalFocusReportOut(BaseModel):
     gaps: list[ApprovalFocusGapOut]
 
 
+class LaunchReadinessGateOut(BaseModel):
+    key: str
+    title: str
+    status: str
+    summary: str
+    detail: str
+    next_step: str
+
+
+class LaunchReadinessReportOut(BaseModel):
+    generated_at: datetime
+    objective: str
+    overall_state: str
+    overall_message: str
+    current_tier: str
+    approved_gates: int
+    watch_gates: int
+    blocked_gates: int
+    can_deploy_low_attention: bool
+    can_deploy_real_money: bool
+    next_unlock: str | None = None
+    gates: list[LaunchReadinessGateOut]
+
+
 class DemoPreviewOut(BaseModel):
     asset_symbol: str
     entry_price: float

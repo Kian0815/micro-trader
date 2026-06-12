@@ -546,6 +546,47 @@
 
       <section class="panel">
         <div class="panel-head">
+          <h2>Launch Readiness</h2>
+          <a href="/api/launch-readiness">JSON</a>
+        </div>
+        <p class="mini-note">{{ launch_readiness.objective }}</p>
+        <div class="story-stream">
+          <article class="story-card">
+            <div class="story-head">
+              <strong>{{ launch_readiness.current_tier }}</strong>
+              <span class="status-badge status-{{ launch_readiness.overall_state }}">{{ launch_readiness.overall_state }}</span>
+            </div>
+            <p>{{ launch_readiness.overall_message }}</p>
+            <div class="threshold-list">
+              <span class="threshold-chip threshold-good">{{ launch_readiness.approved_gates }} approved</span>
+              <span class="threshold-chip {% if launch_readiness.watch_gates %}threshold-bad{% else %}threshold-good{% endif %}">{{ launch_readiness.watch_gates }} watch</span>
+              <span class="threshold-chip {% if launch_readiness.blocked_gates %}threshold-bad{% else %}threshold-good{% endif %}">{{ launch_readiness.blocked_gates }} blocked</span>
+              <span class="threshold-chip {% if launch_readiness.can_deploy_low_attention %}threshold-good{% else %}threshold-bad{% endif %}">paper {{ 'ready' if launch_readiness.can_deploy_low_attention else 'not yet' }}</span>
+              <span class="threshold-chip {% if launch_readiness.can_deploy_real_money %}threshold-good{% else %}threshold-bad{% endif %}">real money {{ 'ready' if launch_readiness.can_deploy_real_money else 'blocked' }}</span>
+            </div>
+            {% if launch_readiness.next_unlock %}
+            <p class="mini-note">Next unlock: {{ launch_readiness.next_unlock }}</p>
+            {% endif %}
+          </article>
+          {% for gate in launch_readiness.gates %}
+          <article class="story-card">
+            <div class="story-head">
+              <strong>{{ gate.title }}</strong>
+              <span class="status-badge status-{{ gate.status }}">{{ gate.status }}</span>
+            </div>
+            <p>{{ gate.summary }}</p>
+            <p class="mini-note">{{ gate.detail }}</p>
+            <div class="threshold-list">
+              <span class="threshold-chip threshold-good">{{ gate.key }}</span>
+              <span class="threshold-chip {% if gate.status == 'ready' %}threshold-good{% else %}threshold-bad{% endif %}">{{ gate.next_step }}</span>
+            </div>
+          </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
           <h2>Setup Approval Board</h2>
           <a href="/api/setups/scorecards">JSON</a>
         </div>
