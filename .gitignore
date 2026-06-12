@@ -3,5 +3,10 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .DS_Store
+._*
 .env
 data/
+backups/
+state/
+build/
+micro_trader.egg-info/
