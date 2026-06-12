@@ -290,6 +290,25 @@ class LaunchReadinessReportOut(BaseModel):
     gates: list[LaunchReadinessGateOut]
 
 
+class LiveDeploymentCheckOut(BaseModel):
+    key: str
+    title: str
+    status: str
+    detail: str
+
+
+class LiveDeploymentReadinessOut(BaseModel):
+    generated_at: datetime
+    overall_state: str
+    overall_message: str
+    live_mode_enabled: bool
+    emergency_stop_active: bool
+    checks_passed: int
+    checks_total: int
+    next_step: str | None = None
+    checks: list[LiveDeploymentCheckOut]
+
+
 class DemoPreviewOut(BaseModel):
     asset_symbol: str
     entry_price: float

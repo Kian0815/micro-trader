@@ -882,6 +882,55 @@
 
       <section class="panel">
         <div class="panel-head">
+          <h2>Live Deployment Checklist</h2>
+          <a href="/api/live-deployment">JSON</a>
+        </div>
+        <div class="spotlight-metrics proof-metrics">
+          <article>
+            <span>Overall</span>
+            <strong class="status-badge status-{{ live_deployment.overall_state }}">{{ live_deployment.overall_state }}</strong>
+            <p class="mini-note">{{ live_deployment.checks_passed }} / {{ live_deployment.checks_total }} checks passed</p>
+          </article>
+          <article>
+            <span>Broker live mode</span>
+            <strong class="status-badge status-{{ 'ready' if live_deployment.live_mode_enabled else 'disabled' }}">{{ 'on' if live_deployment.live_mode_enabled else 'off' }}</strong>
+          </article>
+          <article>
+            <span>Emergency stop</span>
+            <strong class="status-badge status-{{ 'disabled' if live_deployment.emergency_stop_active else 'ready' }}">{{ 'active' if live_deployment.emergency_stop_active else 'released' }}</strong>
+            <p class="mini-note">Keep active until first-capital day</p>
+          </article>
+        </div>
+        <div class="alert-stack">
+          <article class="alert-card alert-warn">
+            <strong>{{ live_deployment.overall_message }}</strong>
+            {% if live_deployment.next_step %}
+            <p>Next blocker: {{ live_deployment.next_step }}</p>
+            {% endif %}
+          </article>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Check</th>
+              <th>Status</th>
+              <th>Detail</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in live_deployment.checks %}
+            <tr>
+              <td>{{ item.title }}</td>
+              <td><span class="status-badge status-{{ item.status }}">{{ item.status }}</span></td>
+              <td>{{ item.detail }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
           <h2>Setup Proof</h2>
           <a href="/api/setups/scorecards">JSON</a>
         </div>

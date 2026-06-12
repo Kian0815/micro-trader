@@ -587,6 +587,39 @@
 
       <section class="panel">
         <div class="panel-head">
+          <h2>Live Deployment Checklist</h2>
+          <a href="/api/live-deployment">JSON</a>
+        </div>
+        <div class="story-stream">
+          <article class="story-card">
+            <div class="story-head">
+              <strong>Live capital gate</strong>
+              <span class="status-badge status-{{ live_deployment.overall_state }}">{{ live_deployment.overall_state }}</span>
+            </div>
+            <p>{{ live_deployment.overall_message }}</p>
+            <div class="threshold-list">
+              <span class="threshold-chip threshold-good">{{ live_deployment.checks_passed }} / {{ live_deployment.checks_total }} passed</span>
+              <span class="threshold-chip {% if live_deployment.live_mode_enabled %}threshold-bad{% else %}threshold-good{% endif %}">live mode {{ 'on' if live_deployment.live_mode_enabled else 'off' }}</span>
+              <span class="threshold-chip {% if live_deployment.emergency_stop_active %}threshold-good{% else %}threshold-bad{% endif %}">emergency stop {{ 'active' if live_deployment.emergency_stop_active else 'released' }}</span>
+            </div>
+            {% if live_deployment.next_step %}
+            <p class="mini-note">Next blocker: {{ live_deployment.next_step }}</p>
+            {% endif %}
+          </article>
+          {% for item in live_deployment.checks %}
+          <article class="story-card">
+            <div class="story-head">
+              <strong>{{ item.title }}</strong>
+              <span class="status-badge status-{{ item.status }}">{{ item.status }}</span>
+            </div>
+            <p>{{ item.detail }}</p>
+          </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
           <h2>Setup Approval Board</h2>
           <a href="/api/setups/scorecards">JSON</a>
         </div>

@@ -167,6 +167,9 @@ BROKER_MODE=paper
 BROKER_ENABLED=false
 BROKER_EXECUTION_TARGET=internal
 BROKER_LIVE_CONFIRMED=false
+LIVE_EMERGENCY_STOP=true
+LIVE_RUNBOOK_ACKNOWLEDGED=false
+LIVE_ALERTS_CONFIGURED=false
 ALPACA_API_KEY=
 ALPACA_API_SECRET=
 ALPACA_BASE_URL=
@@ -194,6 +197,8 @@ Notes:
 - Internal paper execution now stops itself if `BROKER_MODE` is not `paper` or `BROKER_EXECUTION_TARGET` is not `internal`, instead of letting the ledger drift away from broker reality.
 - Broker order submission now supports durable `client_order_id` values and the reconciliation layer compares broker positions and recent orders against the internal execution-intent ledger.
 - `BROKER_LIVE_CONFIRMED=false` blocks live broker submission until you explicitly remove that guard.
+- `LIVE_EMERGENCY_STOP=true` is a second hard block that prevents live submission even if broker live mode is turned on.
+- `LIVE_RUNBOOK_ACKNOWLEDGED=false` and `LIVE_ALERTS_CONFIGURED=false` keep the live deployment checklist red until the operating process is intentionally prepared.
 
 ## Main endpoints
 

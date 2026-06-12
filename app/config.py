@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     broker_enabled: bool = False
     broker_execution_target: str = "internal"
     broker_live_confirmed: bool = False
+    live_emergency_stop: bool = True
+    live_runbook_acknowledged: bool = False
+    live_alerts_configured: bool = False
     alpaca_api_key: str = ""
     alpaca_api_secret: str = ""
     alpaca_base_url: str = ""

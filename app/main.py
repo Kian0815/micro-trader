@@ -49,6 +49,7 @@ from app.schemas import (
     ActiveDemoPositionOut,
     ApprovalFocusReportOut,
     LaunchReadinessReportOut,
+    LiveDeploymentReadinessOut,
     AssetOut,
     BenchmarkReportOut,
     BrokerCapabilitiesOut,
@@ -277,6 +278,11 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         risk_snapshot=risk_snapshot,
         autopilot_status=autopilot_status,
     )
+    live_deployment = _live_deployment_readiness(
+        launch_readiness=launch_readiness,
+        broker_status=broker_status,
+        reconciliation_status=reconciliation_status,
+    )
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -326,6 +332,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             "setup_monitor": setup_monitor,
             "approval_focus": approval_focus,
             "launch_readiness": launch_readiness,
+            "live_deployment": live_deployment,
             "setup_scorecards": setup_scorecards,
             "setup_walkforward": setup_walkforward,
             "benchmark_report": benchmark_report,
@@ -389,6 +396,11 @@ def live_monitor(request: Request, db: Session = Depends(get_db)):
         risk_snapshot=risk_snapshot,
         autopilot_status=autopilot_status,
     )
+    live_deployment = _live_deployment_readiness(
+        launch_readiness=launch_readiness,
+        broker_status=broker_status,
+        reconciliation_status=reconciliation_status,
+    )
     return templates.TemplateResponse(
         request,
         "live.html",
@@ -420,6 +432,7 @@ def live_monitor(request: Request, db: Session = Depends(get_db)):
             "setup_monitor": setup_monitor,
             "approval_focus": approval_focus,
             "launch_readiness": launch_readiness,
+            "live_deployment": live_deployment,
             "setup_scorecards": setup_scorecards,
             "setup_walkforward": setup_walkforward,
             "benchmark_report": benchmark_report,
@@ -667,6 +680,20 @@ def get_launch_readiness(db: Session = Depends(get_db)):
             broker_status=broker_status,
             risk_snapshot=risk_snapshot,
             autopilot_status=autopilot_status,
+        )
+    )
+
+
+@app.get("/api/live-deployment", response_model=LiveDeploymentReadinessOut)
+def get_live_deployment_readiness(db: Session = Depends(get_db)):
+    launch = get_launch_readiness(db)
+    broker_status = build_broker_adapter(settings).status()
+    reconciliation_status = build_reconciliation_service().snapshot(db)
+    return LiveDeploymentReadinessOut(
+        **_live_deployment_readiness(
+            launch_readiness=launch.model_dump(),
+            broker_status=broker_status,
+            reconciliation_status=reconciliation_status,
         )
     )
 
@@ -2438,6 +2465,9 @@ def _launch_readiness_summary(
         and settings.broker_execution_target == "broker"
         and settings.broker_mode == "live"
         and settings.broker_live_confirmed
+        and not settings.live_emergency_stop
+        and settings.live_runbook_acknowledged
+        and settings.live_alerts_configured
         and broker_connected
         and ready_setups > 0
         and not drawdown_lock_active
@@ -2459,7 +2489,9 @@ def _launch_readiness_summary(
             "The platform is structurally close, but not yet cleared for real capital.",
             (
                 f"Broker mode={settings.broker_mode}, execution_target={settings.broker_execution_target}, "
-                f"approved_lanes={ready_setups}, live_confirmed={settings.broker_live_confirmed}."
+                f"approved_lanes={ready_setups}, live_confirmed={settings.broker_live_confirmed}, "
+                f"emergency_stop={settings.live_emergency_stop}, runbook_ack={settings.live_runbook_acknowledged}, "
+                f"alerts_configured={settings.live_alerts_configured}."
             ),
             "Keep using paper mode until the approved lane remains stable and you explicitly switch into broker live execution.",
         )
@@ -2516,6 +2548,96 @@ def _launch_readiness_summary(
         "can_deploy_real_money": can_deploy_real_money,
         "next_unlock": next_unlock,
         "gates": gates,
+    }
+
+
+def _live_deployment_readiness(*, launch_readiness: dict, broker_status, reconciliation_status) -> dict:
+    checks: list[dict] = []
+
+    def add_check(key: str, title: str, passed: bool, detail: str) -> None:
+        checks.append(
+            {
+                "key": key,
+                "title": title,
+                "status": "ready" if passed else "disabled",
+                "detail": detail,
+            }
+        )
+
+    add_check(
+        "approved_lane",
+        "Approved entry lane",
+        bool(launch_readiness.get("can_deploy_low_attention")),
+        (
+            "At least one lane must be approved for unattended paper use before real capital is even considered."
+            if not launch_readiness.get("can_deploy_low_attention")
+            else "A lane is approved for low-attention paper use."
+        ),
+    )
+    add_check(
+        "broker_connected",
+        "Broker connected",
+        bool(getattr(broker_status, "connected", False)),
+        broker_status.message,
+    )
+    add_check(
+        "execution_target_live",
+        "Execution target switched to broker live",
+        settings.broker_execution_target == "broker" and settings.broker_mode == "live",
+        f"Current target={settings.broker_execution_target}, mode={settings.broker_mode}.",
+    )
+    add_check(
+        "live_confirmed",
+        "Explicit live confirmation",
+        settings.broker_live_confirmed,
+        "BROKER_LIVE_CONFIRMED must stay false until you intentionally approve first-capital deployment.",
+    )
+    add_check(
+        "emergency_stop_released",
+        "Emergency stop released",
+        not settings.live_emergency_stop,
+        "LIVE_EMERGENCY_STOP should stay true until the exact moment you intentionally allow live order submission.",
+    )
+    add_check(
+        "runbook_acknowledged",
+        "Runbook acknowledged",
+        settings.live_runbook_acknowledged,
+        "Require an explicit operator acknowledgement that the live runbook, rollback plan, and first-size limits were reviewed.",
+    )
+    add_check(
+        "alerts_configured",
+        "Alerts configured",
+        settings.live_alerts_configured,
+        "Phone/email alerts for fills, failures, and worker downtime should be configured before first live euro.",
+    )
+    add_check(
+        "reconciliation_clean",
+        "Reconciliation clean",
+        reconciliation_status.status == "ok" and reconciliation_status.pending_intents == 0 and reconciliation_status.failed_intents == 0,
+        reconciliation_status.message,
+    )
+
+    checks_passed = len([item for item in checks if item["status"] == "ready"])
+    checks_total = len(checks)
+    live_mode_enabled = settings.broker_execution_target == "broker" and settings.broker_mode == "live"
+    emergency_stop_active = settings.live_emergency_stop
+    overall_state = "ready" if checks_passed == checks_total else "disabled"
+    overall_message = (
+        "Live deployment checklist is fully green."
+        if overall_state == "ready"
+        else "Live deployment is still blocked by design. Keep the emergency stop active until every checklist item is green."
+    )
+    next_step = next((item["detail"] for item in checks if item["status"] != "ready"), None)
+    return {
+        "generated_at": datetime.utcnow(),
+        "overall_state": overall_state,
+        "overall_message": overall_message,
+        "live_mode_enabled": live_mode_enabled,
+        "emergency_stop_active": emergency_stop_active,
+        "checks_passed": checks_passed,
+        "checks_total": checks_total,
+        "next_step": next_step,
+        "checks": checks,
     }
 
 

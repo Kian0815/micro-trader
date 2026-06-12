@@ -380,6 +380,25 @@ class AlpacaBrokerAdapter(BaseBrokerAdapter):
                 fx_rate_as_of=preview.fx_rate_as_of,
                 fx_buffer_pct=preview.fx_buffer_pct,
             )
+        if self.settings.broker_mode == "live" and self.settings.live_emergency_stop:
+            return BrokerOrderResult(
+                provider="alpaca",
+                mode=self.settings.broker_mode,
+                submitted=False,
+                dry_run=dry_run,
+                endpoint=preview.endpoint,
+                payload=preview.payload,
+                client_order_id=client_order_id,
+                broker_order_id=None,
+                broker_status=None,
+                message="Live mode is hard-blocked because LIVE_EMERGENCY_STOP=true.",
+                requested_notional_eur=preview.requested_notional_eur,
+                converted_notional_usd=preview.converted_notional_usd,
+                fx_rate_eur_usd=preview.fx_rate_eur_usd,
+                fx_rate_provider=preview.fx_rate_provider,
+                fx_rate_as_of=preview.fx_rate_as_of,
+                fx_buffer_pct=preview.fx_buffer_pct,
+            )
         if dry_run:
             return BrokerOrderResult(
                 provider="alpaca",
