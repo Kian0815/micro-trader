@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Micro Trader Live Monitor</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <meta http-equiv="refresh" content="5" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Live monitor</p>
+          <h1>Engine Activity</h1>
+          <p class="lede">Auto-refreshing every 5 seconds so you can see what the system is doing right now.</p>
+          <p class="lede">
+            <a class="jump-link" href="/">Back to main dashboard</a>
+          </p>
+        </div>
+        <div class="summary-grid">
+          <article class="card">
+            <span>Last decision time</span>
+            <strong>{{ engine_timing.last_decision_at }}</strong>
+          </article>
+          <article class="card">
+            <span>Next scan in</span>
+            <strong>{{ engine_timing.next_scan_in }}</strong>
+          </article>
+          <article class="card">
+            <span>Active simulation</span>
+            <strong>{{ active_simulation.asset.symbol if active_simulation else "none" }}</strong>
+          </article>
+          <article class="card">
+            <span>Latest alerts</span>
+            <strong>{{ simulation_alerts|length }}</strong>
+          </article>
+        </div>
+        <div class="alert-stack">
+          <article class="alert-card alert-{{ 'success' if simulation_trigger_status.state in ['active', 'ready'] else 'warn' }}">
+            <strong>{{ simulation_trigger_status.headline }}</strong>
+            <p>{{ simulation_trigger_status.detail }}</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="operator-strip">
+        <article class="operator-card">
+          <span>Engine status</span>
+          <strong class="status-badge status-{{ engine_runs[0].status if engine_runs else 'unknown' }}">{{ engine_runs[0].status if engine_runs else "unknown" }}</strong>
+          <p class="mini-note">{{ engine_runs[0].message if engine_runs else "No engine run recorded yet." }}</p>
+        </article>
+        <article class="operator-card">
+          <span>Provider warnings</span>
+          <strong class="status-badge status-{{ 'ok' if not provider_warnings else 'warn' }}">{{ provider_warnings|length }}</strong>
+          <p class="mini-note">
+            {% if provider_warnings %}
+            {{ provider_warnings[0].title }}
+            {% else %}
+            No fresh provider issues detected.
+            {% endif %}
+          </p>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Autopilot Safety</h2>
+        </div>
+        <div class="spotlight-metrics connector-metrics">
+          <article>
+            <span>Current state</span>
+            <strong class="status-badge status-{{ autopilot_status.state }}">{{ autopilot_status.state }}</strong>
+          </article>
+          <article>
+            <span>Allowed live universes</span>
+            <strong>{{ " / ".join(autopilot_status.coverage.keys()) if autopilot_status.coverage else "none" }}</strong>
+          </article>
+          <article>
+            <span>Market regime</span>
+            <strong class="status-badge status-{{ autopilot_status.market_regime.state if autopilot_status.market_regime else 'unknown' }}">
+              {{ autopilot_status.market_regime.state if autopilot_status.market_regime else 'unknown' }}
+            </strong>
+            <p class="mini-note">{{ autopilot_status.market_regime.message if autopilot_status.market_regime else "No regime classification yet." }}</p>
+          </article>
+        </div>
+        <div class="threshold-list">
+          {% for reason in autopilot_status.reasons %}
+          <span class="threshold-chip {% if autopilot_status.state == 'ready' %}threshold-good{% else %}threshold-bad{% endif %}">{{ reason }}</span>
+          {% endfor %}
+        </div>
+        <div class="spotlight-metrics connector-metrics">
+          <article>
+            <span>Gross exposure</span>
+            <strong>{{ "%.2f"|format(risk_snapshot.gross_exposure_pct) }}%</strong>
+            <p class="mini-note">EUR {{ "%.2f"|format(risk_snapshot.gross_open_notional_eur) }} deployed</p>
+          </article>
+          <article>
+            <span>Drawdown lock</span>
+            <strong class="status-badge status-{{ 'warn' if risk_snapshot.drawdown_lock_active else 'ok' }}">
+              {{ 'active' if risk_snapshot.drawdown_lock_active else 'clear' }}
+            </strong>
+            <p class="mini-note">{{ "%.2f"|format(risk_snapshot.drawdown_pct) }}% of {{ "%.2f"|format(risk_snapshot.max_portfolio_drawdown_pct) }}% limit</p>
+          </article>
+          <article>
+            <span>Per-lane caps</span>
+            <strong>ETF {{ "%.0f"|format(risk_snapshot.asset_kind_exposure_limits["etf"]) }}% / Stock {{ "%.0f"|format(risk_snapshot.asset_kind_exposure_limits["stock"]) }}% / Crypto {{ "%.0f"|format(risk_snapshot.asset_kind_exposure_limits["crypto"]) }}%</strong>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Execution Reconciliation</h2>
+        </div>
+        <div class="spotlight-metrics connector-metrics">
+          <article>
+            <span>State</span>
+            <strong class="status-badge status-{{ reconciliation_status.status }}">{{ reconciliation_status.status }}</strong>
+          </article>
+          <article>
+            <span>Target</span>
+            <strong>{{ reconciliation_status.execution_target }}</strong>
+            <p class="mini-note">{{ reconciliation_status.mode }} mode</p>
+          </article>
+          <article>
+            <span>Intent queue</span>
+            <strong>{{ reconciliation_status.pending_intents }} pending / {{ reconciliation_status.failed_intents }} failed</strong>
+          </article>
+          <article>
+            <span>Broker link</span>
+            <strong>{{ "connected" if reconciliation_status.broker_connected else "disconnected" }}</strong>
+            <p class="mini-note">{{ reconciliation_status.provider }}</p>
+          </article>
+          <article>
+            <span>Broker state</span>
+            <strong>{{ reconciliation_status.broker_open_positions }} positions / {{ reconciliation_status.broker_open_orders }} open orders</strong>
+            <p class="mini-note">{{ reconciliation_status.broker_filled_orders }} recent filled orders</p>
+          </article>
+        </div>
+        <div class="threshold-list">
+          {% for item in reconciliation_status.position_mismatches[:3] %}
+          <span class="threshold-chip threshold-bad">{{ item }}</span>
+          {% endfor %}
+          {% for item in reconciliation_status.intent_mismatches[:3] %}
+          <span class="threshold-chip threshold-bad">{{ item }}</span>
+          {% endfor %}
+        </div>
+        <p class="mini-note">{{ reconciliation_status.message }}</p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Benchmark Check</h2>
+        </div>
+        <div class="spotlight-metrics connector-metrics">
+          <article>
+            <span>Strategy return</span>
+            <strong class="{% if benchmark_report.strategy_return_pct >= 0 %}profit-text{% else %}loss-text{% endif %}">
+              {{ "%.2f"|format(benchmark_report.strategy_return_pct) }}%
+            </strong>
+          </article>
+          <article>
+            <span>Best benchmark</span>
+            <strong>{{ benchmark_report.best_benchmark.symbol if benchmark_report.best_benchmark else "n/a" }}</strong>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Performance Scorecard</h2>
+        </div>
+        <div class="spotlight-metrics connector-metrics">
+          <article>
+            <span>Net PnL</span>
+            <strong class="{% if performance_report.net_pnl_eur >= 0 %}profit-text{% else %}loss-text{% endif %}">
+              EUR {{ "%.2f"|format(performance_report.net_pnl_eur) }}
+            </strong>
+            <p class="mini-note">{{ "%.2f"|format(performance_report.strategy_return_pct) }}% return</p>
+          </article>
+          <article>
+            <span>Expectancy</span>
+            <strong class="{% if performance_report.expectancy_eur >= 0 %}profit-text{% else %}loss-text{% endif %}">
+              EUR {{ "%.2f"|format(performance_report.expectancy_eur) }}
+            </strong>
+            <p class="mini-note">{{ performance_report.closed_positions }} closed runs</p>
+          </article>
+          <article>
+            <span>Win rate</span>
+            <strong>{{ "%.2f"|format(performance_report.win_rate_pct) }}%</strong>
+            <p class="mini-note">{{ performance_report.winning_positions }}W / {{ performance_report.losing_positions }}L</p>
+          </article>
+          <article>
+            <span>Max drawdown</span>
+            <strong class="loss-text">{{ "%.2f"|format(performance_report.max_drawdown_pct) }}%</strong>
+            <p class="mini-note">EUR {{ "%.2f"|format(performance_report.max_drawdown_eur) }}</p>
+          </article>
+        </div>
+        <p class="mini-note">{{ performance_report.benchmark_alpha_summary }}</p>
+      </section>
+
+      <section class="panel connector-panel">
+        <div class="panel-head">
+          <h2>Public Equity Research Connectors</h2>
+        </div>
+        <p class="mini-note">{{ research_connectors["summary"] }}</p>
+        <div class="spotlight-metrics connector-metrics">
+          <article>
+            <span>Plugin onboarding</span>
+            <strong class="status-badge status-{{ research_connectors['onboarding_status'] }}">{{ research_connectors["onboarding_status"] }}</strong>
+          </article>
+          <article>
+            <span>Automation</span>
+            <strong class="status-badge status-{{ research_connectors['automation_status'] }}">{{ research_connectors["automation_status"] }}</strong>
+          </article>
+        </div>
+        <div class="connector-grid">
+          {% for item in research_connectors["items"] %}
+          <article class="connector-card">
+            <div class="story-head">
+              <strong>{{ item["label"] }}</strong>
+              <span class="status-badge status-{{ item['status'] }}">{{ item["status"] }}</span>
+            </div>
+            <p class="mini-note">{{ item["provider"] }}</p>
+            <p class="mini-note">Route type: {{ item["source_kind"] }}</p>
+          </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="two-panel-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Provider Health</h2>
+          </div>
+          <div class="spotlight-metrics">
+            {% for kind, sample in provider_health.latest_by_kind.items() %}
+            <article>
+              <span>{{ kind|upper }} provider</span>
+              <strong>{{ sample.provider }}</strong>
+              <p class="mini-note">{{ sample.status }} · {{ sample.successful_assets }}/{{ sample.attempted_assets }} ok</p>
+              <p class="mini-note">{{ sample.stale_assets }} stale · {{ sample.failed_assets }} failed</p>
+              <p class="mini-note">{{ sample.message }}</p>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>State Changes</h2>
+            <a href="/api/state-events">JSON</a>
+          </div>
+          <div class="story-stream compact-grid">
+            {% for event in state_events[:6] %}
+            <article class="story-card">
+              <div class="story-head">
+                <strong>{{ event.title }}</strong>
+                <span class="status-badge status-{{ event.severity }}">{{ event.severity }}</span>
+              </div>
+              <p>{{ event.message }}</p>
+              <span class="story-meta">
+                {{ event.created_at.strftime("%Y-%m-%d %H:%M:%S") }} · {{ event.category }}
+                {% if event.count > 1 %}· repeated {{ event.count }}x{% endif %}
+              </span>
+            </article>
+            {% else %}
+            <p class="mini-note">No state changes recorded yet.</p>
+            {% endfor %}
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Provider Audit</h2>
+          </div>
+          <div class="story-stream compact-grid">
+            {% for item in provider_audit %}
+            <article class="story-card">
+              <div class="story-head">
+                <strong>{{ item.asset_kind|upper }}</strong>
+                <span class="status-badge status-{{ item.status }}">{{ item.status }}</span>
+              </div>
+              <p>Preferred: <strong>{{ item.preferred_provider }}</strong></p>
+              <p>Actual: <strong>{{ item.actual_provider }}</strong></p>
+              <p class="mini-note">{{ "Fallback used on this cycle." if item.fallback_used else "Preferred provider handled this cycle." }}</p>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Signal Outcome Clock</h2>
+          </div>
+          <div class="spotlight-metrics">
+            {% for horizon, data in signal_outcomes.summary_by_horizon.items() %}
+            <article>
+              <span>{{ horizon }}h horizon</span>
+              <strong>{{ data.resolved_count }}</strong>
+              <p class="mini-note">{{ data.pending_count }} pending · avg {{ "%.2f"|format(data.avg_pnl_pct) }}%</p>
+              <p class="mini-note">{{ data.next_due_label }}</p>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+
+        <section class="panel">
+        <div class="panel-head">
+          <h2>Pending Setup Evidence</h2>
+          <a href="/api/setups/pending">JSON</a>
+        </div>
+        {% if pending_setups.board_note %}
+        <p class="mini-note">{{ pending_setups.board_note }}</p>
+        {% endif %}
+        <div class="story-stream compact-grid">
+            {% for row in pending_setups.rows[:6] %}
+            <article class="story-card">
+              <div class="story-head">
+                <strong>{{ row.setup_type }}</strong>
+                <span class="status-badge status-muted">{{ row.asset_kind|upper }}</span>
+              </div>
+              <p>{{ row.pending_count }} pending {{ row.action|upper }} outcomes across {{ row.horizons|join(", ") }}h windows.</p>
+              <span class="story-meta">{{ row.latest_signal_at.strftime("%Y-%m-%d %H:%M:%S") }} · {{ row.next_due_label }}</span>
+            </article>
+            {% else %}
+            <p class="mini-note">{% if pending_setups.board_note %}No non-defensive ETF setup queues are worth surfacing right now.{% else %}No pending setup outcomes right now.{% endif %}</p>
+            {% endfor %}
+          </div>
+        </section>
+      </section>
+
+      <section class="two-panel-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Provider Warnings</h2>
+          </div>
+          <div class="alert-stack">
+            {% for item in provider_warnings %}
+            <article class="alert-card alert-{{ item.severity }}">
+              <strong>{{ item.title }}</strong>
+              <p>{{ item.message }}</p>
+            </article>
+            {% else %}
+            <article class="alert-card alert-ok">
+              <strong>Providers healthy</strong>
+              <p>All tracked assets currently have fresh quotes inside the execution freshness window.</p>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Why This Trade Happened</h2>
+          </div>
+          <div class="story-stream">
+            {% for item in trade_story %}
+            <article class="story-card">
+              <div class="story-head">
+                <strong>{{ item.headline }}</strong>
+                <span class="status-badge status-{{ item.status }}">{{ item.status }}</span>
+              </div>
+              <p>{{ item.reason }}</p>
+              <span class="story-meta">{{ item.meta }}</span>
+            </article>
+            {% else %}
+            <p class="mini-note">No trades yet.</p>
+            {% endfor %}
+          </div>
+        </section>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Best Opportunity Now</h2>
+          <a href="/api/opportunity/best">JSON</a>
+        </div>
+        {% if best_opportunity.best %}
+        <div class="story-stream">
+          <article class="story-card">
+            <div class="story-head">
+              <strong><span class="kind-chip kind-{{ best_opportunity.best.asset_kind }}">{{ best_opportunity.best.asset_kind }}</span> {{ best_opportunity.best.symbol }}</strong>
+              <span class="status-badge status-{{ 'ready' if best_opportunity.best.eligible_for_unattended else best_opportunity.best.approval_status }}">{{ 'ready' if best_opportunity.best.eligible_for_unattended else best_opportunity.best.approval_status }}</span>
+            </div>
+            <p>{{ best_opportunity.best.setup_type }} · score {{ "%.2f"|format(best_opportunity.best.score) }} · quality {{ "%.2f"|format(best_opportunity.best.setup_quality_score) }}</p>
+            <p class="mini-note">Scorecard {{ best_opportunity.best.approval_status }} · walk-forward {{ best_opportunity.best.walkforward_recommendation }} · live proof {{ best_opportunity.best.live_proof_status }}</p>
+            <p class="mini-note">
+              {% if best_opportunity.best.eligible_for_unattended %}
+              Strongest currently tradable cross-asset setup.
+              {% else %}
+              {{ best_opportunity.best.blocked_reason }}
+              {% endif %}
+            </p>
+          </article>
+          {% if best_opportunity.best_building_live %}
+          <article class="story-card">
+            <div class="story-head">
+              <strong><span class="kind-chip kind-{{ best_opportunity.best_building_live.asset_kind }}">{{ best_opportunity.best_building_live.asset_kind }}</span> {{ best_opportunity.best_building_live.symbol }}</strong>
+              <span class="status-badge status-{{ best_opportunity.best_building_live.live_proof_status }}">{{ best_opportunity.best_building_live.live_proof_status }}</span>
+            </div>
+            <p>{{ best_opportunity.best_building_live.setup_type }} · score {{ "%.2f"|format(best_opportunity.best_building_live.score) }} · quality {{ "%.2f"|format(best_opportunity.best_building_live.setup_quality_score) }}</p>
+            <p class="mini-note">Best candidate still building live evidence.</p>
+          </article>
+          {% endif %}
+          {% for row in best_opportunity.top_candidates[1:4] %}
+          <article class="story-card">
+            <div class="story-head">
+              <strong><span class="kind-chip kind-{{ row.asset_kind }}">{{ row.asset_kind }}</span> {{ row.symbol }}</strong>
+              <span class="status-badge status-{{ row.live_proof_status }}">{{ row.live_proof_status }}</span>
+            </div>
+            <p>{{ row.setup_type }} · score {{ "%.2f"|format(row.score) }} · quality {{ "%.2f"|format(row.setup_quality_score) }}</p>
+            <p class="mini-note">{% if row.eligible_for_unattended %}Ready if capital/risk permits.{% else %}{{ row.blocked_reason }}{% endif %}</p>
+          </article>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="mini-note">No fresh cross-asset BUY opportunity is available right now.</p>
+        {% endif %}
+        {% if best_opportunity.regime_transition %}
+        <div class="alert-stack">
+          <article class="alert-card alert-{{ 'warn' if best_opportunity.regime_transition.severity == 'warn' else 'success' }}">
+            <strong>{{ best_opportunity.regime_transition.title }}</strong>
+            <p>{{ best_opportunity.regime_transition.message }}</p>
+          </article>
+        </div>
+        {% endif %}
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Setup Monitor</h2>
+          <a href="/api/setups/monitor">JSON</a>
+        </div>
+        <p class="mini-note">{{ setup_monitor.overall_message }}</p>
+        <div class="spotlight-metrics proof-metrics">
+          <article>
+            <span>Overall</span>
+            <strong class="status-badge status-{{ setup_monitor.overall_state }}">{{ setup_monitor.overall_state }}</strong>
+            <p class="mini-note">Go / not yet</p>
+          </article>
+          <article>
+            <span>Ready</span>
+            <strong>{{ setup_monitor.ready_setups_count }}</strong>
+            <p class="mini-note">Cleared entry setups</p>
+          </article>
+          <article>
+            <span>Building live</span>
+            <strong>{{ setup_monitor.building_live_count }}</strong>
+            <p class="mini-note">Waiting on real outcomes</p>
+          </article>
+          <article>
+            <span>Replay only</span>
+            <strong>{{ setup_monitor.replay_only_count }}</strong>
+            <p class="mini-note">Research-only candidates</p>
+          </article>
+        </div>
+        <div class="story-stream">
+          {% for item in setup_monitor.alerts %}
+          <article class="story-card">
+            <div class="story-head">
+              <strong>{{ item.title }}</strong>
+              <span class="status-badge status-{{ item.severity }}">{{ item.severity }}</span>
+            </div>
+            <p>{{ item.message }}</p>
+          </article>
+          {% endfor %}
+          {% if setup_monitor.active_candidate %}
+          <article class="story-card">
+            <div class="story-head">
+              <strong><span class="kind-chip kind-{{ setup_monitor.active_candidate.asset_kind }}">{{ setup_monitor.active_candidate.asset_kind }}</span> {{ setup_monitor.active_candidate.asset_symbol }}</strong>
+              <span class="status-badge status-{{ setup_monitor.active_candidate.live_proof_status }}">{{ setup_monitor.active_candidate.live_proof_status }}</span>
+            </div>
+            <p>{{ setup_monitor.active_candidate.setup_type }} · {{ setup_monitor.active_candidate.action }} · next {{ setup_monitor.active_candidate.next_target }}</p>
+            <div class="threshold-list">
+              <span class="threshold-chip threshold-good">{{ setup_monitor.active_candidate.live_sample_count }} live / {{ setup_monitor.active_candidate.replay_sample_count }} replay</span>
+              <span class="threshold-chip threshold-good">{{ setup_monitor.active_candidate.pending_count }} pending</span>
+              <span class="threshold-chip threshold-good">test exp. {{ "%.2f"|format(setup_monitor.active_candidate.test_net_expectancy_pct or 0) }}%</span>
+            </div>
+          </article>
+          {% endif %}
+          {% if setup_monitor.nearest_candidate %}
+          <article class="story-card">
+            <div class="story-head">
+              <strong><span class="kind-chip kind-{{ setup_monitor.nearest_candidate.asset_kind }}">{{ setup_monitor.nearest_candidate.asset_kind }}</span> {{ setup_monitor.nearest_candidate.setup_type }}</strong>
+              <span class="status-badge status-{{ setup_monitor.nearest_candidate.live_proof_status }}">{{ setup_monitor.nearest_candidate.live_proof_status }}</span>
+            </div>
+            <p>
+              {% if setup_monitor.recovery_candidate %}
+              {{ setup_monitor.nearest_candidate.note }}
+              {% else %}
+              {{ setup_monitor.nearest_candidate.pending_count }} pending outcomes · {{ setup_monitor.nearest_candidate.next_due_label }}
+              {% endif %}
+            </p>
+            <div class="threshold-list">
+              <span class="threshold-chip threshold-good">{{ setup_monitor.nearest_candidate.live_sample_count }} live / {{ setup_monitor.nearest_candidate.replay_sample_count }} replay</span>
+              <span class="threshold-chip threshold-good">{{ setup_monitor.nearest_candidate.recommendation }}</span>
+              {% if setup_monitor.recovery_candidate %}
+              <span class="threshold-chip threshold-bad">transition track</span>
+              {% endif %}
+            </div>
+          </article>
+          {% endif %}
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>First Approved Lane</h2>
+          <a href="/api/setups/focus">JSON</a>
+        </div>
+        <p class="mini-note">{{ approval_focus.objective }}</p>
+        <div class="story-stream">
+          <article class="story-card">
+            <div class="story-head">
+              <strong>{{ approval_focus.headline }}</strong>
+              <span class="status-badge status-{{ approval_focus.state }}">{{ approval_focus.state }}</span>
+            </div>
+            <p>{{ approval_focus.message }}</p>
+            {% if approval_focus.target_setup %}
+            <div class="threshold-list">
+              <span class="threshold-chip threshold-good">{{ approval_focus.target_asset_kind|upper }} {{ approval_focus.target_setup }}</span>
+              {% if approval_focus.scorecard_status %}<span class="threshold-chip threshold-good">scorecard {{ approval_focus.scorecard_status }}</span>{% endif %}
+              {% if approval_focus.walkforward_status %}<span class="threshold-chip threshold-good">walk-forward {{ approval_focus.walkforward_status }}</span>{% endif %}
+              {% if approval_focus.live_proof_status %}<span class="threshold-chip threshold-good">live {{ approval_focus.live_proof_status }}</span>{% endif %}
+              {% if approval_focus.pending_count %}<span class="threshold-chip threshold-good">{{ approval_focus.pending_count }} pending</span>{% endif %}
+              {% if approval_focus.evidence_status %}<span class="threshold-chip threshold-{{ 'good' if approval_focus.evidence_status == 'building_live' else 'bad' if approval_focus.evidence_status in ['warn','stale'] else 'good' }}">{{ approval_focus.evidence_status }}</span>{% endif %}
+            </div>
+            {% endif %}
+            {% if approval_focus.evidence_message %}
+            <p class="mini-note">{{ approval_focus.evidence_message }}</p>
+            {% endif %}
+          </article>
+          {% for gap in approval_focus.gaps %}
+          <article class="story-card">
+            <div class="story-head">
+              <strong>{{ gap.label }}</strong>
+              <span class="status-badge status-{{ gap.status }}">{{ gap.status }}</span>
+            </div>
+            <p>{{ gap.detail }}</p>
+          </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Setup Approval Board</h2>
+          <a href="/api/setups/scorecards">JSON</a>
+        </div>
+        {% if setup_scorecards.board_note %}
+        <p class="mini-note">{{ setup_scorecards.board_note }}</p>
+        {% endif %}
+        <div class="spotlight-metrics proof-metrics">
+          <article>
+            <span>Approved</span>
+            <strong>{{ setup_scorecards.approved_count }}</strong>
+            <p class="mini-note">{{ setup_scorecards.total_resolved }} resolved outcomes tracked</p>
+          </article>
+          <article>
+            <span>Watch</span>
+            <strong>{{ setup_scorecards.watch_count }}</strong>
+            <p class="mini-note">Mixed or thin evidence</p>
+          </article>
+          <article>
+            <span>Disabled</span>
+            <strong>{{ setup_scorecards.disabled_count }}</strong>
+            <p class="mini-note">Do not auto-promote</p>
+          </article>
+          <article>
+            <span>Blocked entries</span>
+            <strong>{{ setup_scorecards.blocked_entry_count }}</strong>
+            <p class="mini-note">Entry ideas failing proof right now</p>
+          </article>
+          <article>
+            <span>Defensive-only</span>
+            <strong>{{ setup_scorecards.defensive_count }}</strong>
+            <p class="mini-note">Exit setups shown separately from entries</p>
+          </article>
+        </div>
+        <div class="story-stream">
+          {% for row in setup_scorecards.promoted_entry_rows[:6] %}
+          <article class="story-card">
+            <div class="story-head">
+              <strong><span class="kind-chip kind-{{ row.asset_kind }}">{{ row.asset_kind }}</span> {{ row.setup_type }}</strong>
+              <span class="status-badge status-{{ row.approval_status }}">{{ row.approval_status }}</span>
+            </div>
+            <p>{{ row.note }}</p>
+            <div class="threshold-list">
+              <span class="threshold-chip {% if row.net_expectancy_pct >= 0 %}threshold-good{% else %}threshold-bad{% endif %}">Net exp. {{ "%.2f"|format(row.net_expectancy_pct) }}%</span>
+              <span class="threshold-chip threshold-good">Win rate {{ "%.2f"|format(row.win_rate_pct) }}%</span>
+              <span class="threshold-chip {% if row.false_positive_rate_pct >= 45 %}threshold-bad{% else %}threshold-good{% endif %}">False positives {{ "%.0f"|format(row.false_positive_rate_pct) }}%</span>
+              <span class="threshold-chip threshold-good">Samples {{ row.sample_count }}</span>
+            </div>
+          </article>
+          {% else %}
+          <p class="mini-note">No entry setup is promotable right now. Blocked candidates are tracked separately below.</p>
+          {% endfor %}
+        </div>
+        {% if setup_scorecards.blocked_entry_rows %}
+        <div class="story-stream">
+          {% for row in setup_scorecards.blocked_entry_rows[:3] %}
+          <article class="story-card">
+            <div class="story-head">
+              <strong><span class="kind-chip kind-{{ row.asset_kind }}">{{ row.asset_kind }}</span> {{ row.setup_type }}</strong>
+              <span class="status-badge status-{{ row.approval_status }}">{{ row.approval_status }}</span>
+            </div>
+            <p>{{ row.note }}</p>
+            <div class="threshold-list">
+              <span class="threshold-chip {% if row.net_expectancy_pct >= 0 %}threshold-good{% else %}threshold-bad{% endif %}">Net exp. {{ "%.2f"|format(row.net_expectancy_pct) }}%</span>
+              <span class="threshold-chip {% if row.false_positive_rate_pct >= 45 %}threshold-bad{% else %}threshold-good{% endif %}">False positives {{ "%.0f"|format(row.false_positive_rate_pct) }}%</span>
+              <span class="threshold-chip threshold-good">Samples {{ row.sample_count }}</span>
+            </div>
+          </article>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Walk-Forward Board</h2>
+          <a href="/api/setups/walk-forward">JSON</a>
+        </div>
+        {% if setup_walkforward.board_note %}
+        <p class="mini-note">{{ setup_walkforward.board_note }}</p>
+        {% endif %}
+        <div class="spotlight-metrics proof-metrics">
+          <article>
+            <span>Approved</span>
+            <strong>{{ setup_walkforward.approved_count }}</strong>
+            <p class="mini-note">Passed train and test</p>
+          </article>
+          <article>
+            <span>Watch</span>
+            <strong>{{ setup_walkforward.watch_count }}</strong>
+            <p class="mini-note">Needs more proof</p>
+          </article>
+          <article>
+            <span>Disabled</span>
+            <strong>{{ setup_walkforward.disabled_count }}</strong>
+            <p class="mini-note">Failed out-of-sample</p>
+          </article>
+          <article>
+            <span>Replay rows</span>
+            <strong>{{ setup_walkforward.replay_total_resolved }}</strong>
+            <p class="mini-note">Historical replay outcomes added</p>
+          </article>
+          <article>
+            <span>Blocked entries</span>
+            <strong>{{ setup_walkforward.blocked_entry_count }}</strong>
+            <p class="mini-note">Entry ideas failing test or live-proof</p>
+          </article>
+          <article>
+            <span>Defensive-only</span>
+            <strong>{{ setup_walkforward.defensive_count }}</strong>
+            <p class="mini-note">Exit setups kept out of entry ranking</p>
+          </article>
+        </div>
+        <div class="story-stream">
+          {% for row in setup_walkforward.promoted_entry_rows[:6] %}
+          <article class="story-card">
+            <div class="story-head">
+              <strong><span class="kind-chip kind-{{ row.asset_kind }}">{{ row.asset_kind }}</span> {{ row.setup_type }}</strong>
+              <span class="status-badge status-{{ row.recommendation }}">{{ row.recommendation }}</span>
+            </div>
+            <p>{{ row.note }}</p>
+            <div class="threshold-list">
+              <span class="threshold-chip threshold-good">{{ row.live_proof_status }}</span>
+              <span class="threshold-chip threshold-good">{{ row.live_sample_count }} live / {{ row.replay_sample_count }} replay</span>
+              <span class="threshold-chip {% if row.train.net_expectancy_pct >= 0 %}threshold-good{% else %}threshold-bad{% endif %}">Train {{ "%.2f"|format(row.train.net_expectancy_pct) }}%</span>
+              <span class="threshold-chip {% if row.test.net_expectancy_pct >= 0 %}threshold-good{% else %}threshold-bad{% endif %}">Test {{ "%.2f"|format(row.test.net_expectancy_pct) }}%</span>
+              <span class="threshold-chip {% if row.test.avg_decision_edge_pct >= 0 %}threshold-good{% else %}threshold-bad{% endif %}">Edge {{ "%.2f"|format(row.test.avg_decision_edge_pct) }}%</span>
+              <span class="threshold-chip {% if row.test.max_drawdown_pct <= 1.0 %}threshold-good{% else %}threshold-bad{% endif %}">DD {{ "%.2f"|format(row.test.max_drawdown_pct) }}%</span>
+            </div>
+          </article>
+          {% else %}
+          <p class="mini-note">No entry lane has cleared walk-forward review yet. Blocked entry lanes are listed separately below.</p>
+          {% endfor %}
+        </div>
+        {% if setup_walkforward.blocked_entry_rows %}
+        <div class="story-stream">
+          {% for row in setup_walkforward.blocked_entry_rows[:3] %}
+          <article class="story-card">
+            <div class="story-head">
+              <strong><span class="kind-chip kind-{{ row.asset_kind }}">{{ row.asset_kind }}</span> {{ row.setup_type }}</strong>
+              <span class="status-badge status-{{ row.recommendation }}">{{ row.recommendation }}</span>
+            </div>
+            <p>{{ row.note }}</p>
+            <div class="threshold-list">
+              <span class="threshold-chip threshold-good">{{ row.live_proof_status }}</span>
+              <span class="threshold-chip threshold-good">{{ row.live_sample_count }} live / {{ row.replay_sample_count }} replay</span>
+              <span class="threshold-chip {% if row.test.net_expectancy_pct >= 0 %}threshold-good{% else %}threshold-bad{% endif %}">Test {{ "%.2f"|format(row.test.net_expectancy_pct) }}%</span>
+              <span class="threshold-chip {% if row.test.avg_decision_edge_pct >= 0 %}threshold-good{% else %}threshold-bad{% endif %}">Edge {{ "%.2f"|format(row.test.avg_decision_edge_pct) }}%</span>
+            </div>
+          </article>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Threshold Misses</h2>
+        </div>
+        {% if strategy_diagnostics_note %}
+        <p class="mini-note">{{ strategy_diagnostics_note }}</p>
+        {% endif %}
+        <div class="story-stream">
+          {% for item in strategy_diagnostics %}
+          <article class="story-card">
+            <div class="story-head">
+              <strong><span class="kind-chip kind-{{ item.asset_kind }}">{{ item.asset_kind }}</span> {{ item.asset_symbol }}</strong>
+              <span class="status-badge status-{{ item.action }}">{{ item.action }}</span>
+            </div>
+            <p>{{ item.setup_type }} · Score {{ "%.2f"|format(item.score) }} · Sentiment {{ "%.2f"|format(item.sentiment_score) }} · Momentum {{ "%.2f"|format(item.momentum_score) }} · News {{ item.news_count }}</p>
+            {% if item.failed_checks %}
+            <div class="threshold-list">
+              {% for reason in item.failed_checks %}
+              <span class="threshold-chip threshold-bad">{{ reason }}</span>
+              {% endfor %}
+            </div>
+            {% else %}
+            <div class="threshold-list">
+              <span class="threshold-chip threshold-good">Passed all buy checks</span>
+            </div>
+            {% endif %}
+          </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Engine Runs</h2>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Completed</th>
+              <th>Status</th>
+              <th>Assets</th>
+              <th>News</th>
+              <th>Signals</th>
+              <th>Message</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for run in engine_runs %}
+            <tr>
+              <td>{{ run.completed_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+              <td>{{ run.status }}</td>
+              <td>{{ run.assets_count }}</td>
+              <td>{{ run.news_items_count }}</td>
+              <td>{{ run.signals_count }}</td>
+              <td>{{ run.message }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="two-panel-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Crypto Market</h2>
+          </div>
+          <table>
+            <thead>
+            <tr>
+              <th>Asset</th>
+              <th>Price</th>
+              <th>Change</th>
+              <th>Source</th>
+              <th>Status</th>
+              <th>Last quote</th>
+            </tr>
+          </thead>
+          <tbody>
+              {% for row in crypto_market %}
+              <tr>
+                <td><span class="kind-chip kind-crypto">Crypto</span> {{ row.symbol }}</td>
+                <td>{% if row.price is not none %}EUR {{ "%.2f"|format(row.price) }}{% else %}-{% endif %}</td>
+                <td>{% if row.change_24h_pct is not none %}{{ "%.2f"|format(row.change_24h_pct) }}%{% else %}-{% endif %}</td>
+                <td>{{ row.source }}</td>
+                <td><span class="status-badge status-{{ row.freshness }}">{{ row.freshness }}</span></td>
+                <td>{% if row.captured_at %}{{ row.captured_at.strftime("%H:%M:%S") }} UTC · {{ row.age_seconds }}s ago{% else %}-{% endif %}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>ETF Market</h2>
+          </div>
+          <table>
+            <thead>
+            <tr>
+              <th>Asset</th>
+              <th>Price</th>
+              <th>Change</th>
+              <th>Source</th>
+              <th>Status</th>
+              <th>Last quote</th>
+            </tr>
+          </thead>
+          <tbody>
+              {% for row in etf_market %}
+              <tr>
+                <td><span class="kind-chip kind-etf">ETF</span> {{ row.symbol }}</td>
+                <td>{% if row.price is not none %}EUR {{ "%.2f"|format(row.price) }}{% else %}-{% endif %}</td>
+                <td>{% if row.change_24h_pct is not none %}{{ "%.2f"|format(row.change_24h_pct) }}%{% else %}-{% endif %}</td>
+                <td>{{ row.source }}</td>
+                <td><span class="status-badge status-{{ row.freshness }}">{{ row.freshness }}</span></td>
+                <td>{% if row.captured_at %}{{ row.captured_at.strftime("%H:%M:%S") }} UTC · {{ row.age_seconds }}s ago{% else %}-{% endif %}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Stock Market</h2>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Asset</th>
+              <th>Price</th>
+              <th>Change</th>
+              <th>Source</th>
+              <th>Status</th>
+              <th>Last quote</th>
+            </tr>
+          </thead>
+          <tbody>
+              {% for row in stock_market %}
+              <tr>
+                <td><span class="kind-chip kind-stock">Stock</span> {{ row.symbol }}</td>
+                <td>{% if row.price is not none %}EUR {{ "%.2f"|format(row.price) }}{% else %}-{% endif %}</td>
+                <td>{% if row.change_24h_pct is not none %}{{ "%.2f"|format(row.change_24h_pct) }}%{% else %}-{% endif %}</td>
+                <td>{{ row.source }}</td>
+                <td><span class="status-badge status-{{ row.freshness }}">{{ row.freshness }}</span></td>
+                <td>{% if row.captured_at %}{{ row.captured_at.strftime("%H:%M:%S") }} UTC · {{ row.age_seconds }}s ago{% else %}-{% endif %}</td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="6">No stock quotes yet.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+      </section>
+
+      <section class="two-panel-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Latest Signals</h2>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Asset</th>
+                <th>Action</th>
+                <th>Score</th>
+                <th>Why</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for signal in signals %}
+              <tr>
+                <td>{{ signal.created_at.strftime("%H:%M:%S") }}</td>
+                <td>{{ signal.asset.symbol }}</td>
+                <td class="pill pill-{{ signal.action.value }}">{{ signal.action.value }}</td>
+                <td>{{ "%.2f"|format(signal.score) }}</td>
+                <td>{{ signal.rationale }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Latest Trades</h2>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Asset</th>
+                <th>Side</th>
+                <th>Status</th>
+                <th>Price</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for trade in trades %}
+              <tr>
+                <td>{{ trade.executed_at.strftime("%H:%M:%S") }}</td>
+                <td>{{ trade.asset.symbol }}</td>
+                <td>{{ trade.side.value }}</td>
+                <td><span class="status-badge status-{{ trade.status.value }}">{{ trade.status.value }}</span></td>
+                <td>EUR {{ "%.2f"|format(trade.price) }}</td>
+                <td>{{ trade.reason }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+      </section>
+
+      <section class="two-panel-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Latest News</h2>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Asset</th>
+                <th>Source</th>
+                <th>Headline</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in news_items %}
+              <tr>
+                <td>{{ item.published_at.strftime("%Y-%m-%d %H:%M") }}</td>
+                <td>{{ item.asset.symbol if item.asset else "-" }}</td>
+                <td>{{ item.source }}</td>
+                <td><a class="news-link" href="{{ item.url }}" target="_blank" rel="noreferrer">{{ item.title }}</a></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Simulation Alerts</h2>
+          </div>
+          <div class="alert-stack">
+            {% for alert in simulation_alerts %}
+            <article class="alert-card alert-{{ alert.level }}">
+              <strong>{{ alert.title }}</strong>
+              <p>{{ alert.message }}</p>
+              <span>{{ alert.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</span>
+            </article>
+            {% else %}
+            <p class="mini-note">No recent simulation alerts.</p>
+            {% endfor %}
+          </div>
+        </section>
+      </section>
+    </main>
+  </body>
+  </html>

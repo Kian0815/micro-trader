@@ -1,0 +1,1867 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Micro Trader</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <meta http-equiv="refresh" content="30" />
+  </head>
+  <body>
+    <main class="layout">
+      {% if message %}
+      <section class="banner">{{ message }}</section>
+      {% endif %}
+
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Local paper trading</p>
+          <h1>Micro Trader</h1>
+          <p class="lede">Built for a 30 EUR account with strict capital protection.</p>
+          <p class="lede"><a class="jump-link" href="#live-simulation">Jump to 100 EUR simulation</a></p>
+          <p class="lede"><a class="jump-link" href="/live">Open live engine monitor</a></p>
+        </div>
+        <div class="summary-grid">
+          <article class="card">
+            <span>Available cash</span>
+            <strong>EUR {{ "%.2f"|format(summary.available_cash_eur) }}</strong>
+          </article>
+          <article class="card">
+            <span>Realized PnL</span>
+            <strong>EUR {{ "%.2f"|format(summary.realized_pnl_eur) }}</strong>
+          </article>
+          <article class="card">
+            <span>Open positions</span>
+            <strong>{{ summary.open_positions }}</strong>
+          </article>
+          <article class="card">
+            <span>Total signals</span>
+            <strong>{{ summary.latest_signal_count }}</strong>
+          </article>
+          {% if featured_open_position and featured_open_position.asset %}
+          <article class="card active-demo-card" id="active-demo-position-card">
+            <div class="active-demo-head">
+              <span>Active demo position</span>
+              <strong id="active-demo-symbol">{{ featured_open_position.asset.symbol }}</strong>
+            </div>
+            {% if featured_open_position_status %}
+            <div class="active-demo-pnl-row">
+              <span class="mini-note">Unrealized PnL</span>
+              <strong id="active-demo-pnl" class="{% if (featured_open_position_status.unrealized_pnl_eur or 0) >= 0 %}profit-text{% else %}loss-text{% endif %}">
+                EUR {{ "%.4f"|format(featured_open_position_status.unrealized_pnl_eur or 0) }}
+              </strong>
+              <span class="active-demo-pct" id="active-demo-pnl-pct">{{ "%.2f"|format(featured_open_position_status.unrealized_pnl_pct or 0) }}%</span>
+            </div>
+            <div class="active-demo-metrics">
+              <article>
+                <span>Invested</span>
+                <strong>EUR <span id="active-demo-invested">{{ "%.2f"|format(featured_open_position_status.invested_notional_eur) }}</span></strong>
+              </article>
+              <article>
+                <span>Current value</span>
+                <strong>EUR <span id="active-demo-value">{{ "%.2f"|format(featured_open_position_status.current_value_eur or 0) }}</span></strong>
+              </article>
+              <article>
+                <span>Entry price</span>
+                <strong>EUR <span id="active-demo-entry">{{ "%.2f"|format(featured_open_position.entry_price) }}</span></strong>
+              </article>
+              <article>
+                <span>Current price</span>
+                <strong>EUR <span id="active-demo-current">{{ "%.2f"|format(featured_open_position_status.current_price or 0) }}</span></strong>
+              </article>
+              <article>
+                <span>Stop</span>
+                <strong>EUR <span id="active-demo-stop">{{ "%.2f"|format(featured_open_position_status.stop_loss) }}</span></strong>
+              </article>
+              <article>
+                <span>Target</span>
+                <strong>EUR <span id="active-demo-target">{{ "%.2f"|format(featured_open_position_status.take_profit) }}</span></strong>
+              </article>
+            </div>
+            <p class="mini-note active-demo-foot">
+              Size <span id="active-demo-qty">{{ "%.8f"|format(featured_open_position.quantity) }}</span> BTC
+              · live mark updates every 5s
+            </p>
+            {% endif %}
+          </article>
+          {% endif %}
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Execution Guardrails</h2>
+        </div>
+        <div class="spotlight-metrics">
+          <article>
+            <span>Trading enabled</span>
+            <strong>{{ "yes" if execution_guardrails.trading_enabled else "no" }}</strong>
+          </article>
+          <article>
+            <span>Simulation enabled</span>
+            <strong>{{ "yes" if execution_guardrails.simulation_enabled else "no" }}</strong>
+          </article>
+          <article>
+            <span>Max tick age</span>
+            <strong>{{ execution_guardrails.max_tick_age_seconds }} sec</strong>
+          </article>
+          <article>
+            <span>Cooldown</span>
+            <strong>{{ execution_guardrails.min_minutes_between_trades }} min</strong>
+          </article>
+          <article>
+            <span>Last engine status</span>
+            <strong>{{ execution_guardrails.last_engine_status }}</strong>
+          </article>
+          <article>
+            <span>Last engine run</span>
+            <strong>{{ execution_guardrails.last_engine_completed_at }}</strong>
+          </article>
+          <article>
+            <span>Trade universes</span>
+            <strong>{{ execution_guardrails.tradeable_asset_kinds|join(", ") }}</strong>
+          </article>
+          <article>
+            <span>Simulation universes</span>
+            <strong>{{ execution_guardrails.simulation_asset_kinds|join(", ") }}</strong>
+          </article>
+          <article>
+            <span>Autopilot state</span>
+            <strong class="status-badge status-{{ execution_guardrails.autopilot_state }}">{{ execution_guardrails.autopilot_state }}</strong>
+          </article>
+          <article>
+            <span>Market regime</span>
+            <strong class="status-badge status-{{ execution_guardrails.market_regime.state if execution_guardrails.market_regime else 'unknown' }}">
+              {{ execution_guardrails.market_regime.state if execution_guardrails.market_regime else 'unknown' }}
+            </strong>
+          </article>
+          <article>
+            <span>Min fresh coverage</span>
+            <strong>{{ execution_guardrails.min_data_coverage_ratio_pct|int }}%</strong>
+          </article>
+          <article>
+            <span>Max gross exposure</span>
+            <strong>{{ "%.2f"|format(execution_guardrails.max_gross_exposure_pct) }}%</strong>
+          </article>
+          <article>
+            <span>Max symbol exposure</span>
+            <strong>{{ "%.2f"|format(execution_guardrails.max_symbol_exposure_pct) }}%</strong>
+          </article>
+          <article>
+            <span>Drawdown lock</span>
+            <strong>{{ "%.2f"|format(execution_guardrails.max_portfolio_drawdown_pct) }}%</strong>
+          </article>
+          <article>
+            <span>Liquidate on breach</span>
+            <strong>{{ "yes" if execution_guardrails.liquidate_on_drawdown_breach else "no" }}</strong>
+          </article>
+        </div>
+        <p class="mini-note">{{ execution_guardrails.last_engine_message }}</p>
+        {% if execution_guardrails.market_regime %}
+        <p class="mini-note">{{ execution_guardrails.market_regime.message }}</p>
+        {% endif %}
+        <div class="spotlight-metrics">
+          <article>
+            <span>Current gross exposure</span>
+            <strong>{{ "%.2f"|format(execution_guardrails.risk_snapshot.gross_exposure_pct) }}%</strong>
+            <p class="mini-note">EUR {{ "%.2f"|format(execution_guardrails.risk_snapshot.gross_open_notional_eur) }} deployed</p>
+          </article>
+          <article>
+            <span>Current drawdown</span>
+            <strong class="{% if execution_guardrails.risk_snapshot.drawdown_lock_active %}loss-text{% else %}profit-text{% endif %}">
+              {{ "%.2f"|format(execution_guardrails.risk_snapshot.drawdown_pct) }}%
+            </strong>
+            <p class="mini-note">Peak EUR {{ "%.2f"|format(execution_guardrails.risk_snapshot.peak_equity_eur) }} · now EUR {{ "%.2f"|format(execution_guardrails.risk_snapshot.current_equity_eur) }}</p>
+          </article>
+          <article>
+            <span>Per-lane caps</span>
+            <strong>
+              ETF {{ "%.0f"|format(execution_guardrails.asset_kind_exposure_limits["etf"]) }}% /
+              Stock {{ "%.0f"|format(execution_guardrails.asset_kind_exposure_limits["stock"]) }}% /
+              Crypto {{ "%.0f"|format(execution_guardrails.asset_kind_exposure_limits["crypto"]) }}%
+            </strong>
+          </article>
+        </div>
+        <div class="threshold-list">
+          {% for reason in execution_guardrails.autopilot_reasons %}
+          <span class="threshold-chip {% if execution_guardrails.autopilot_state == 'ready' %}threshold-good{% else %}threshold-bad{% endif %}">{{ reason }}</span>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Execution Reconciliation</h2>
+        </div>
+        <div class="spotlight-metrics">
+          <article>
+            <span>Reconciliation state</span>
+            <strong class="status-badge status-{{ reconciliation_status.status }}">{{ reconciliation_status.status }}</strong>
+          </article>
+          <article>
+            <span>Execution target</span>
+            <strong>{{ reconciliation_status.execution_target }}</strong>
+            <p class="mini-note">{{ reconciliation_status.mode }} mode via {{ reconciliation_status.provider }}</p>
+          </article>
+          <article>
+            <span>Broker connected</span>
+            <strong>{{ "yes" if reconciliation_status.broker_connected else "no" }}</strong>
+            <p class="mini-note">{{ reconciliation_status.broker_account_id or "no account linked" }}</p>
+          </article>
+          <article>
+            <span>Intent queue</span>
+            <strong>{{ reconciliation_status.pending_intents }} pending / {{ reconciliation_status.failed_intents }} failed</strong>
+          </article>
+          <article>
+            <span>Broker state</span>
+            <strong>{{ reconciliation_status.broker_open_positions }} positions / {{ reconciliation_status.broker_open_orders }} open orders</strong>
+            <p class="mini-note">{{ reconciliation_status.broker_filled_orders }} recent filled orders</p>
+          </article>
+          <article>
+            <span>Ledger positions</span>
+            <strong>{{ reconciliation_status.ledger_open_positions }} open / {{ reconciliation_status.ledger_closed_positions }} closed</strong>
+          </article>
+          <article>
+            <span>Ledger deployed</span>
+            <strong>EUR {{ "%.2f"|format(reconciliation_status.ledger_open_notional_eur) }}</strong>
+            <p class="mini-note">Realized EUR {{ "%.2f"|format(reconciliation_status.ledger_realized_pnl_eur) }}</p>
+          </article>
+        </div>
+        <div class="threshold-list">
+          {% for item in reconciliation_status.position_mismatches[:4] %}
+          <span class="threshold-chip threshold-bad">{{ item }}</span>
+          {% endfor %}
+          {% for item in reconciliation_status.intent_mismatches[:4] %}
+          <span class="threshold-chip threshold-bad">{{ item }}</span>
+          {% endfor %}
+        </div>
+        <p class="mini-note">{{ reconciliation_status.message }}</p>
+      </section>
+
+      <section class="panel connector-panel">
+        <div class="panel-head">
+          <h2>Public Equity Research Connectors</h2>
+        </div>
+        <p class="mini-note">{{ research_connectors["summary"] }}</p>
+        <div class="spotlight-metrics connector-metrics">
+          <article>
+            <span>Plugin onboarding</span>
+            <strong class="status-badge status-{{ research_connectors['onboarding_status'] }}">{{ research_connectors["onboarding_status"] }}</strong>
+          </article>
+          <article>
+            <span>Automation</span>
+            <strong class="status-badge status-{{ research_connectors['automation_status'] }}">{{ research_connectors["automation_status"] }}</strong>
+          </article>
+        </div>
+        <div class="connector-grid">
+          {% for item in research_connectors["items"] %}
+          <article class="connector-card">
+            <div class="story-head">
+              <strong>{{ item["label"] }}</strong>
+              <span class="status-badge status-{{ item['status'] }}">{{ item["status"] }}</span>
+            </div>
+            <p class="mini-note">{{ item["provider"] }}</p>
+            <p class="mini-note">Route type: {{ item["source_kind"] }}</p>
+          </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Benchmark Check</h2>
+        </div>
+        <div class="spotlight-metrics">
+          <article>
+            <span>Strategy return</span>
+            <strong class="{% if benchmark_report.strategy_return_pct >= 0 %}profit-text{% else %}loss-text{% endif %}">
+              {{ "%.2f"|format(benchmark_report.strategy_return_pct) }}%
+            </strong>
+          </article>
+          <article>
+            <span>Best benchmark</span>
+            <strong>{{ benchmark_report.best_benchmark.symbol if benchmark_report.best_benchmark else "n/a" }}</strong>
+          </article>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Benchmark</th>
+              <th>Return</th>
+              <th>Alpha vs strategy</th>
+              <th>Start</th>
+              <th>Latest</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in benchmark_report.rows %}
+            <tr>
+              <td>{{ row.symbol }}</td>
+              <td>{{ "%.2f"|format(row.return_pct) }}%</td>
+              <td class="{% if row.alpha_pct >= 0 %}profit-text{% else %}loss-text{% endif %}">{{ "%.2f"|format(row.alpha_pct) }}%</td>
+              <td>EUR {{ "%.2f"|format(row.start_price) }}</td>
+              <td>EUR {{ "%.2f"|format(row.latest_price) }}</td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="5">No benchmark history is available yet.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Performance Scorecard</h2>
+        </div>
+        <div class="spotlight-metrics">
+          <article>
+            <span>Net PnL</span>
+            <strong class="{% if performance_report.net_pnl_eur >= 0 %}profit-text{% else %}loss-text{% endif %}">
+              EUR {{ "%.2f"|format(performance_report.net_pnl_eur) }}
+            </strong>
+            <p class="mini-note">Return {{ "%.2f"|format(performance_report.strategy_return_pct) }}%</p>
+          </article>
+          <article>
+            <span>Expectancy</span>
+            <strong class="{% if performance_report.expectancy_eur >= 0 %}profit-text{% else %}loss-text{% endif %}">
+              EUR {{ "%.2f"|format(performance_report.expectancy_eur) }}
+            </strong>
+            <p class="mini-note">{{ "%.2f"|format(performance_report.expectancy_pct) }}% per closed run</p>
+          </article>
+          <article>
+            <span>Win rate</span>
+            <strong>{{ "%.2f"|format(performance_report.win_rate_pct) }}%</strong>
+            <p class="mini-note">{{ performance_report.winning_positions }} wins · {{ performance_report.losing_positions }} losses</p>
+          </article>
+          <article>
+            <span>Profit factor</span>
+            <strong>{{ "%.2f"|format(performance_report.profit_factor) if performance_report.profit_factor is not none else "n/a" }}</strong>
+            <p class="mini-note">Breakeven runs: {{ performance_report.breakeven_positions }}</p>
+          </article>
+          <article>
+            <span>Max drawdown</span>
+            <strong class="loss-text">EUR {{ "%.2f"|format(performance_report.max_drawdown_eur) }}</strong>
+            <p class="mini-note">{{ "%.2f"|format(performance_report.max_drawdown_pct) }}% from peak equity</p>
+          </article>
+          <article>
+            <span>Current drawdown</span>
+            <strong class="{% if performance_report.current_drawdown_eur == 0 %}profit-text{% else %}loss-text{% endif %}">
+              EUR {{ "%.2f"|format(performance_report.current_drawdown_eur) }}
+            </strong>
+            <p class="mini-note">Peak EUR {{ "%.2f"|format(performance_report.peak_equity_eur) }} · now EUR {{ "%.2f"|format(performance_report.current_equity_eur) }}</p>
+          </article>
+        </div>
+        <p class="mini-note">{{ performance_report.benchmark_alpha_summary }}</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Closed runs</th>
+              <th>Avg closed PnL</th>
+              <th>Avg win</th>
+              <th>Avg loss</th>
+              <th>Realized</th>
+              <th>Unrealized</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>{{ performance_report.closed_positions }}</td>
+              <td class="{% if performance_report.avg_closed_pnl_eur >= 0 %}profit-text{% else %}loss-text{% endif %}">
+                EUR {{ "%.2f"|format(performance_report.avg_closed_pnl_eur) }} ({{ "%.2f"|format(performance_report.avg_closed_pnl_pct) }}%)
+              </td>
+              <td class="profit-text">EUR {{ "%.2f"|format(performance_report.avg_win_eur) }}</td>
+              <td class="loss-text">EUR {{ "%.2f"|format(performance_report.avg_loss_eur) }}</td>
+              <td class="{% if performance_report.realized_pnl_eur >= 0 %}profit-text{% else %}loss-text{% endif %}">EUR {{ "%.2f"|format(performance_report.realized_pnl_eur) }}</td>
+              <td class="{% if performance_report.unrealized_pnl_eur >= 0 %}profit-text{% else %}loss-text{% endif %}">EUR {{ "%.2f"|format(performance_report.unrealized_pnl_eur) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="two-panel-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Provider Health</h2>
+          </div>
+          <div class="spotlight-metrics">
+            {% for kind, sample in provider_health.latest_by_kind.items() %}
+            <article>
+              <span>{{ kind|upper }} provider</span>
+              <strong>{{ sample.provider }}</strong>
+              <p class="mini-note">
+                {{ sample.status }} · {{ sample.successful_assets }}/{{ sample.attempted_assets }} assets ok
+              </p>
+              <p class="mini-note">{{ sample.message }}</p>
+            </article>
+            {% endfor %}
+          </div>
+          <div class="alert-stack compact-grid">
+            {% for sample in provider_health.recent_failures %}
+            <article class="alert-card alert-{{ 'danger' if sample.status == 'error' else 'warn' }}">
+              <strong>{{ sample.asset_kind|upper }} · {{ sample.provider }}</strong>
+              <p>{{ sample.message }}</p>
+              <span>{{ sample.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</span>
+            </article>
+            {% else %}
+            <p class="mini-note">No recent provider warnings recorded.</p>
+            {% endfor %}
+          </div>
+        </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Provider Audit</h2>
+        </div>
+          <div class="story-stream">
+            {% for item in provider_audit %}
+            <article class="story-card">
+              <div class="story-head">
+                <strong>{{ item.asset_kind|upper }}</strong>
+                <span class="status-badge status-{{ item.status }}">{{ item.status }}</span>
+              </div>
+              <p>Preferred: <strong>{{ item.preferred_provider }}</strong> · Actual: <strong>{{ item.actual_provider }}</strong></p>
+              <p class="mini-note">{{ "Fallback used on this cycle." if item.fallback_used else "Preferred provider handled this cycle." }}</p>
+              <p class="mini-note">{{ item.message }}</p>
+            </article>
+            {% endfor %}
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>State Changes</h2>
+          <a href="/api/state-events">JSON</a>
+        </div>
+        <p class="mini-note">This is the engine's memory of meaningful changes, so you can track what actually changed between scans.</p>
+        <div class="alert-stack">
+          {% for event in state_events %}
+          <article class="alert-card alert-{{ event.severity }}">
+            <strong>{{ event.title }}</strong>
+            <p>{{ event.message }}</p>
+            <span>
+              {{ event.created_at.strftime("%Y-%m-%d %H:%M:%S") }} · {{ event.category }}
+              {% if event.count > 1 %}· repeated {{ event.count }}x{% endif %}
+            </span>
+          </article>
+          {% else %}
+          <p class="mini-note">No state changes recorded yet.</p>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Signal Outcomes</h2>
+          </div>
+          <div class="spotlight-metrics">
+            {% for horizon, data in signal_outcomes.summary_by_horizon.items() %}
+            <article>
+              <span>{{ horizon }}h horizon</span>
+              <strong>{{ "%.2f"|format(data.win_rate_pct) }}%</strong>
+              <p class="mini-note">{{ data.resolved_count }} resolved · {{ data.pending_count }} pending</p>
+              <p class="mini-note">avg {{ "%.2f"|format(data.avg_pnl_pct) }}% · {{ data.next_due_label }}</p>
+            </article>
+            {% endfor %}
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Action</th>
+                <th>Horizon</th>
+                <th>Outcome</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in signal_outcomes.latest_resolved %}
+              <tr>
+                <td>{{ item.signal.asset.symbol }}</td>
+                <td class="pill pill-{{ item.signal.action.value }}">{{ item.signal.action.value }}</td>
+                <td>{{ item.horizon_hours }}h</td>
+                <td class="{% if item.pnl_pct and item.pnl_pct >= 0 %}profit-text{% else %}loss-text{% endif %}">
+                  {% if item.pnl_pct is not none %}{{ "%.2f"|format(item.pnl_pct) }}%{% else %}-{% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="4">No resolved signal outcomes yet.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Pending Setup Evidence</h2>
+          <a href="/api/setups/pending">JSON</a>
+        </div>
+        {% if pending_setups.board_note %}
+        <p class="mini-note">{{ pending_setups.board_note }}</p>
+        {% endif %}
+        <p class="mini-note">
+          These signals have fired, but their 1h / 4h / 24h outcome windows are still open. This is the queue that needs to resolve before stock and ETF setups can graduate.
+        </p>
+        <div class="spotlight-metrics proof-metrics">
+          <article>
+            <span>Total pending</span>
+            <strong>{{ pending_setups.total_pending }}</strong>
+            <p class="mini-note">Unresolved setup outcomes currently tracked</p>
+          </article>
+          <article>
+            <span>Most recent queue</span>
+            <strong>{% if pending_setups.rows %}{{ pending_setups.rows[0].setup_type }}{% else %}-{% endif %}</strong>
+            <p class="mini-note">
+              {% if pending_setups.rows %}
+              {{ pending_setups.rows[0].pending_count }} pending · {{ pending_setups.rows[0].next_due_label }}
+              {% else %}
+              No setup outcomes waiting to resolve
+              {% endif %}
+            </p>
+          </article>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Lane</th>
+              <th>Setup</th>
+              <th>Action</th>
+              <th>Pending</th>
+              <th>Horizons</th>
+              <th>Latest signal</th>
+              <th>Next due</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in pending_setups.rows[:8] %}
+            <tr>
+              <td>{{ row.asset_kind|upper }}</td>
+              <td>{{ row.setup_type }}</td>
+              <td class="pill pill-{{ row.action }}">{{ row.action }}</td>
+              <td>{{ row.pending_count }}</td>
+              <td>{{ row.horizons|join(", ") }}h</td>
+              <td>{{ row.latest_signal_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+              <td>{{ row.next_due_label }}</td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="7">{% if pending_setups.board_note %}No non-defensive ETF setup queues are worth surfacing right now.{% else %}No pending setup outcomes right now.{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Best Opportunity Now</h2>
+          <a href="/api/opportunity/best">JSON</a>
+        </div>
+        {% if best_opportunity.best %}
+        <p class="mini-note">
+          The engine ranks fresh BUY candidates across {{ best_opportunity.allowed_asset_kinds|join(", ") }} and still requires unattended setup status in {{ best_opportunity.allowed_setup_statuses|join(", ") }}.
+        </p>
+        <div class="spotlight-metrics proof-metrics">
+          <article>
+            <span>Top candidate</span>
+            <strong><span class="kind-chip kind-{{ best_opportunity.best.asset_kind }}">{{ best_opportunity.best.asset_kind }}</span> {{ best_opportunity.best.symbol }}</strong>
+            <p class="mini-note">{{ best_opportunity.best.setup_type }} · score {{ "%.2f"|format(best_opportunity.best.score) }}</p>
+          </article>
+          <article>
+            <span>Unattended status</span>
+            <strong class="status-badge status-{{ 'ready' if best_opportunity.best.eligible_for_unattended else best_opportunity.best.approval_status }}">{{ 'ready' if best_opportunity.best.eligible_for_unattended else best_opportunity.best.approval_status }}</strong>
+            <p class="mini-note">{{ best_opportunity.best.approval_status }} proof gate</p>
+          </article>
+          <article>
+            <span>Proof strength</span>
+            <strong>{{ best_opportunity.best.proof_sample_count }}</strong>
+            <p class="mini-note">net expectancy {{ "%.2f"|format(best_opportunity.best.net_expectancy_pct) }}%</p>
+          </article>
+          <article>
+            <span>Live proof</span>
+            <strong class="status-badge status-{{ best_opportunity.best.live_proof_status }}">{{ best_opportunity.best.live_proof_status }}</strong>
+            <p class="mini-note">{{ best_opportunity.best.live_sample_count }} live · {{ best_opportunity.best.replay_sample_count }} replay</p>
+          </article>
+          <article>
+            <span>Market freshness</span>
+            <strong>{% if best_opportunity.best.tick_age_seconds is not none %}{{ best_opportunity.best.tick_age_seconds }} sec{% else %}missing{% endif %}</strong>
+            <p class="mini-note">signal age {{ best_opportunity.best.signal_age_seconds }} sec</p>
+          </article>
+        </div>
+        {% if best_opportunity.best_building_live %}
+        <div class="alert-stack">
+          <article class="alert-card alert-warn">
+            <strong>Closest Building-Live Candidate: {{ best_opportunity.best_building_live.symbol }}</strong>
+            <p>
+              {{ best_opportunity.best_building_live.setup_type }} is not unattended-ready yet, but it is the strongest setup still building live proof.
+              Walk-forward {{ best_opportunity.best_building_live.walkforward_recommendation }}, live-proof {{ best_opportunity.best_building_live.live_proof_status }}.
+            </p>
+          </article>
+        </div>
+        {% endif %}
+        <div class="alert-stack">
+          <article class="alert-card alert-{{ 'success' if best_opportunity.best.eligible_for_unattended else 'warn' }}">
+            <strong>{{ best_opportunity.best.symbol }} · {{ best_opportunity.best.setup_type }}</strong>
+            <p>
+              {% if best_opportunity.best.eligible_for_unattended %}
+              This is the strongest currently tradable cross-asset setup.
+              {% else %}
+              {{ best_opportunity.best.blocked_reason }}
+              {% endif %}
+            </p>
+          </article>
+        </div>
+        {% if best_opportunity.regime_transition %}
+        <div class="alert-stack">
+          <article class="alert-card alert-{{ 'warn' if best_opportunity.regime_transition.severity == 'warn' else 'success' }}">
+            <strong>{{ best_opportunity.regime_transition.title }}</strong>
+            <p>{{ best_opportunity.regime_transition.message }}</p>
+          </article>
+        </div>
+        {% endif %}
+        <table>
+          <thead>
+            <tr>
+              <th>Asset</th>
+              <th>Setup</th>
+              <th>Score</th>
+              <th>Quality</th>
+              <th>Proof</th>
+              <th>Live proof</th>
+              <th>Live state</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in best_opportunity.top_candidates %}
+            <tr>
+              <td><span class="kind-chip kind-{{ row.asset_kind }}">{{ row.asset_kind }}</span> {{ row.symbol }}</td>
+              <td>{{ row.setup_type }}</td>
+              <td>{{ "%.2f"|format(row.score) }}</td>
+              <td>{{ "%.2f"|format(row.setup_quality_score) }}</td>
+              <td><span class="status-badge status-{{ row.approval_status }}">{{ row.approval_status }}</span></td>
+              <td><span class="status-badge status-{{ row.live_proof_status }}">{{ row.live_proof_status }}</span></td>
+              <td>{% if row.eligible_for_unattended %}ready{% else %}{{ row.blocked_reason }}{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="mini-note">No fresh cross-asset BUY opportunity is available right now.</p>
+        {% if best_opportunity.regime_transition %}
+        <div class="alert-stack">
+          <article class="alert-card alert-{{ 'warn' if best_opportunity.regime_transition.severity == 'warn' else 'success' }}">
+            <strong>{{ best_opportunity.regime_transition.title }}</strong>
+            <p>{{ best_opportunity.regime_transition.message }}</p>
+          </article>
+        </div>
+        {% endif %}
+        {% endif %}
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Setup Monitor</h2>
+          <a href="/api/setups/monitor">JSON</a>
+        </div>
+        <p class="mini-note">{{ setup_monitor.overall_message }}</p>
+        <div class="spotlight-metrics proof-metrics">
+          <article>
+            <span>Overall state</span>
+            <strong class="status-badge status-{{ setup_monitor.overall_state }}">{{ setup_monitor.overall_state }}</strong>
+            <p class="mini-note">Current go / not yet status</p>
+          </article>
+          <article>
+            <span>Ready setups</span>
+            <strong>{{ setup_monitor.ready_setups_count }}</strong>
+            <p class="mini-note">Cleared for unattended review</p>
+          </article>
+          <article>
+            <span>Building live</span>
+            <strong>{{ setup_monitor.building_live_count }}</strong>
+            <p class="mini-note">Live evidence is accumulating</p>
+          </article>
+          <article>
+            <span>Replay only</span>
+            <strong>{{ setup_monitor.replay_only_count }}</strong>
+            <p class="mini-note">Research-only until live proof arrives</p>
+          </article>
+        </div>
+        <div class="alert-stack">
+          {% for item in setup_monitor.alerts %}
+          <article class="alert-card alert-{{ item.severity }}">
+            <strong>{{ item.title }}</strong>
+            <p>{{ item.message }}</p>
+          </article>
+          {% endfor %}
+        </div>
+        {% if setup_monitor.active_candidate %}
+        <div class="spotlight-metrics proof-metrics">
+          <article>
+            <span>Active candidate</span>
+            <strong><span class="kind-chip kind-{{ setup_monitor.active_candidate.asset_kind }}">{{ setup_monitor.active_candidate.asset_kind }}</span> {{ setup_monitor.active_candidate.asset_symbol }}</strong>
+            <p class="mini-note">{{ setup_monitor.active_candidate.setup_type }} · {{ setup_monitor.active_candidate.action }}</p>
+          </article>
+          <article>
+            <span>Current stage</span>
+            <strong class="status-badge status-{{ setup_monitor.active_candidate.live_proof_status }}">{{ setup_monitor.active_candidate.live_proof_status }}</strong>
+            <p class="mini-note">{{ setup_monitor.active_candidate.recommendation }} on walk-forward</p>
+          </article>
+          <article>
+            <span>Proof runway</span>
+            <strong>{{ setup_monitor.active_candidate.live_sample_count }} live / {{ setup_monitor.active_candidate.replay_sample_count }} replay</strong>
+            <p class="mini-note">{{ setup_monitor.active_candidate.pending_count }} pending · {{ setup_monitor.active_candidate.next_due_label }}</p>
+          </article>
+          <article>
+            <span>Next target</span>
+            <strong>{{ setup_monitor.active_candidate.next_target }}</strong>
+            <p class="mini-note">test exp. {{ "%.2f"|format(setup_monitor.active_candidate.test_net_expectancy_pct or 0) }}%</p>
+          </article>
+        </div>
+        {% endif %}
+        {% if setup_monitor.nearest_candidate %}
+        <table>
+          <thead>
+            <tr>
+              <th>Nearest Candidate</th>
+              <th>Walk-forward</th>
+              <th>Live proof</th>
+              <th>Sources</th>
+              <th>Pending</th>
+              <th>Next due</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="kind-chip kind-{{ setup_monitor.nearest_candidate.asset_kind }}">{{ setup_monitor.nearest_candidate.asset_kind }}</span> {{ setup_monitor.nearest_candidate.setup_type }}</td>
+              <td><span class="status-badge status-{{ setup_monitor.nearest_candidate.recommendation }}">{{ setup_monitor.nearest_candidate.recommendation }}</span></td>
+              <td><span class="status-badge status-{{ setup_monitor.nearest_candidate.live_proof_status }}">{{ setup_monitor.nearest_candidate.live_proof_status }}</span></td>
+              <td>{{ setup_monitor.nearest_candidate.live_sample_count }} live / {{ setup_monitor.nearest_candidate.replay_sample_count }} replay</td>
+              <td>{% if setup_monitor.recovery_candidate %}transition{% else %}{{ setup_monitor.nearest_candidate.pending_count }}{% endif %}</td>
+              <td>{% if setup_monitor.recovery_candidate %}{{ setup_monitor.nearest_candidate.note }}{% else %}{{ setup_monitor.nearest_candidate.next_due_label }}{% endif %}</td>
+            </tr>
+          </tbody>
+        </table>
+        {% endif %}
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>First Approved Lane</h2>
+          <a href="/api/setups/focus">JSON</a>
+        </div>
+        <p class="mini-note">{{ approval_focus.objective }}</p>
+        <div class="spotlight-metrics proof-metrics">
+          <article>
+            <span>Target lane</span>
+            <strong>{% if approval_focus.target_setup %}<span class="kind-chip kind-{{ approval_focus.target_asset_kind }}">{{ approval_focus.target_asset_kind }}</span> {{ approval_focus.target_setup }}{% else %}-{% endif %}</strong>
+            <p class="mini-note">{{ approval_focus.headline }}</p>
+          </article>
+          <article>
+            <span>Scorecard</span>
+            <strong class="status-badge status-{{ approval_focus.scorecard_status or approval_focus.state }}">{{ approval_focus.scorecard_status or approval_focus.state }}</strong>
+            <p class="mini-note">Resolved-outcome gate</p>
+          </article>
+          <article>
+            <span>Walk-forward</span>
+            <strong class="status-badge status-{{ approval_focus.walkforward_status or approval_focus.state }}">{{ approval_focus.walkforward_status or approval_focus.state }}</strong>
+            <p class="mini-note">Train/test gate</p>
+          </article>
+          <article>
+            <span>Live proof</span>
+            <strong class="status-badge status-{{ approval_focus.live_proof_status or approval_focus.state }}">{{ approval_focus.live_proof_status or approval_focus.state }}</strong>
+            <p class="mini-note">{% if approval_focus.next_due_label %}{{ approval_focus.next_due_label }}{% else %}Waiting for stronger evidence{% endif %}</p>
+          </article>
+          <article>
+            <span>Evidence flow</span>
+            <strong class="status-badge status-{{ approval_focus.evidence_status or approval_focus.state }}">{{ approval_focus.evidence_status or approval_focus.state }}</strong>
+            <p class="mini-note">{{ approval_focus.evidence_message or 'No freshness signal yet.' }}</p>
+          </article>
+        </div>
+        <div class="alert-stack">
+          <article class="alert-card alert-{{ 'warn' if approval_focus.state != 'ok' else 'ok' }}">
+            <strong>{{ approval_focus.headline }}</strong>
+            <p>{{ approval_focus.message }}</p>
+          </article>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Gap</th>
+              <th>Status</th>
+              <th>What still needs to happen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for gap in approval_focus.gaps %}
+            <tr>
+              <td>{{ gap.label }}</td>
+              <td><span class="status-badge status-{{ gap.status }}">{{ gap.status }}</span></td>
+              <td>{{ gap.detail }}</td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="3">No focused approval target is available yet.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Setup Proof</h2>
+          <a href="/api/setups/scorecards">JSON</a>
+        </div>
+        {% if setup_scorecards.board_note %}
+        <p class="mini-note">{{ setup_scorecards.board_note }}</p>
+        {% endif %}
+        <p class="mini-note">
+          Evidence comes from resolved 4h and 24h signal outcomes with a small cost haircut, so this is a promotion gate for unattended mode, not a full institutional backtest.
+        </p>
+        <div class="spotlight-metrics proof-metrics">
+          <article>
+            <span>Approved</span>
+            <strong>{{ setup_scorecards.approved_count }}</strong>
+            <p class="mini-note">Eligible for unattended review</p>
+          </article>
+          <article>
+            <span>Watch</span>
+            <strong>{{ setup_scorecards.watch_count }}</strong>
+            <p class="mini-note">Needs more evidence</p>
+          </article>
+          <article>
+            <span>Disabled</span>
+            <strong>{{ setup_scorecards.disabled_count }}</strong>
+            <p class="mini-note">Blocked for unattended entries</p>
+          </article>
+          <article>
+            <span>Blocked entries</span>
+            <strong>{{ setup_scorecards.blocked_entry_count }}</strong>
+            <p class="mini-note">Entry ideas currently failing proof</p>
+          </article>
+          <article>
+            <span>Defensive-only</span>
+            <strong>{{ setup_scorecards.defensive_count }}</strong>
+            <p class="mini-note">Exit setups kept separate from entry ranking</p>
+          </article>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Lane</th>
+              <th>Setup</th>
+              <th>Status</th>
+              <th>Samples</th>
+              <th>Win rate</th>
+              <th>Net exp.</th>
+              <th>Edge</th>
+              <th>Why</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in setup_scorecards.promoted_entry_rows[:8] %}
+            <tr>
+              <td><span class="kind-chip kind-{{ row.asset_kind }}">{{ row.asset_kind }}</span></td>
+              <td>{{ row.setup_type }}</td>
+              <td><span class="status-badge status-{{ row.approval_status }}">{{ row.approval_status }}</span></td>
+              <td>{{ row.sample_count }} <span class="mini-note">({{ row.resolved_4h }} / {{ row.resolved_24h }})</span></td>
+              <td>{{ "%.2f"|format(row.win_rate_pct) }}%</td>
+              <td class="{% if row.net_expectancy_pct >= 0 %}profit-text{% else %}loss-text{% endif %}">{{ "%.2f"|format(row.net_expectancy_pct) }}%</td>
+              <td>{{ "%.2f"|format(row.avg_decision_edge_pct) }}%</td>
+              <td>{{ row.note }}</td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="8">No entry setup is promotable right now. Blocked candidates remain tracked, but they are not ranked as contenders.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Walk-Forward Lab</h2>
+          <a href="/api/setups/walk-forward">JSON</a>
+        </div>
+        {% if setup_walkforward.board_note %}
+        <p class="mini-note">{{ setup_walkforward.board_note }}</p>
+        {% endif %}
+        <p class="mini-note">
+          This splits each setup's resolved history into roughly 70% training and 30% test data. It is still short-horizon evidence, but it is a better promotion filter than one blended score.
+        </p>
+        <div class="spotlight-metrics proof-metrics">
+          <article>
+            <span>Approved</span>
+            <strong>{{ setup_walkforward.approved_count }}</strong>
+            <p class="mini-note">Passed train and test</p>
+          </article>
+          <article>
+            <span>Watch</span>
+            <strong>{{ setup_walkforward.watch_count }}</strong>
+            <p class="mini-note">Interesting but thin or mixed</p>
+          </article>
+          <article>
+            <span>Disabled</span>
+            <strong>{{ setup_walkforward.disabled_count }}</strong>
+            <p class="mini-note">Failed out-of-sample check</p>
+          </article>
+          <article>
+            <span>Replay rows</span>
+            <strong>{{ setup_walkforward.replay_total_resolved }}</strong>
+            <p class="mini-note">Historical replay outcomes added</p>
+          </article>
+          <article>
+            <span>Blocked entries</span>
+            <strong>{{ setup_walkforward.blocked_entry_count }}</strong>
+            <p class="mini-note">Entry ideas failing test or live-proof</p>
+          </article>
+          <article>
+            <span>Defensive-only</span>
+            <strong>{{ setup_walkforward.defensive_count }}</strong>
+            <p class="mini-note">Exit setups kept out of entry ranking</p>
+          </article>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Lane</th>
+              <th>Setup</th>
+              <th>Walk-forward</th>
+              <th>Live proof</th>
+              <th>Sources</th>
+              <th>Train exp.</th>
+              <th>Test exp.</th>
+              <th>Test edge</th>
+              <th>Test DD</th>
+              <th>Why</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in setup_walkforward.promoted_entry_rows[:8] %}
+            <tr>
+              <td><span class="kind-chip kind-{{ row.asset_kind }}">{{ row.asset_kind }}</span></td>
+              <td>{{ row.setup_type }}</td>
+              <td><span class="status-badge status-{{ row.recommendation }}">{{ row.recommendation }}</span></td>
+              <td><span class="status-badge status-{{ row.live_proof_status }}">{{ row.live_proof_status }}</span></td>
+              <td>{{ row.live_sample_count }} live / {{ row.replay_sample_count }} replay</td>
+              <td class="{% if row.train.net_expectancy_pct >= 0 %}profit-text{% else %}loss-text{% endif %}">{{ "%.2f"|format(row.train.net_expectancy_pct) }}%</td>
+              <td class="{% if row.test.net_expectancy_pct >= 0 %}profit-text{% else %}loss-text{% endif %}">{{ "%.2f"|format(row.test.net_expectancy_pct) }}%</td>
+              <td class="{% if row.test.avg_decision_edge_pct >= 0 %}profit-text{% else %}loss-text{% endif %}">{{ "%.2f"|format(row.test.avg_decision_edge_pct) }}%</td>
+              <td>{{ "%.2f"|format(row.test.max_drawdown_pct) }}%</td>
+              <td>{{ row.note }}</td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="10">No entry lane has cleared walk-forward review yet. Failed or blocked lanes stay visible elsewhere, but they are not ranked here.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Strategy Diagnostics</h2>
+        </div>
+        {% if strategy_diagnostics_note %}
+        <p class="mini-note">{{ strategy_diagnostics_note }}</p>
+        {% endif %}
+        <table>
+          <thead>
+            <tr>
+              <th>Asset</th>
+              <th>Setup</th>
+              <th>Action</th>
+              <th>Score</th>
+              <th>Sentiment</th>
+              <th>Momentum</th>
+              <th>News</th>
+              <th>Blocked by</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in strategy_diagnostics %}
+            <tr>
+              <td><span class="kind-chip kind-{{ item.asset_kind }}">{{ item.asset_kind }}</span> {{ item.asset_symbol }}</td>
+              <td>{{ item.setup_type }}</td>
+              <td class="pill pill-{{ item.action }}">{{ item.action }}</td>
+              <td>{{ "%.2f"|format(item.score) }}</td>
+              <td>{{ "%.2f"|format(item.sentiment_score) }}</td>
+              <td>{{ "%.2f"|format(item.momentum_score) }}</td>
+              <td>{{ item.news_count }}</td>
+              <td>
+                {% if item.failed_checks %}
+                <div class="threshold-list">
+                  {% for reason in item.failed_checks %}
+                  <span class="threshold-chip threshold-bad">{{ reason }}</span>
+                  {% endfor %}
+                </div>
+                {% else %}
+                <span class="threshold-chip threshold-good">Passed all buy checks</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel spotlight-panel" id="live-simulation">
+        <div class="panel-head">
+          <h2>Live 100 EUR Simulation</h2>
+          <a href="/api/simulation">JSON</a>
+        </div>
+        {% if active_simulation %}
+        <div class="spotlight-grid">
+          <div>
+            <p class="spotlight-label">Best asset now</p>
+            <p class="spotlight-asset">
+              <span class="kind-chip kind-{{ active_simulation.asset.kind.value }}">{{ active_simulation.asset.kind.value }}</span>
+              {{ active_simulation.asset.symbol }}
+            </p>
+            <div class="explain-list">
+              <p><strong>Why bought:</strong> {{ simulation_plan.why_bought }}</p>
+              <p><strong>Why it will sell:</strong> {{ simulation_plan.why_sell }}</p>
+              <p><strong>Estimated next action:</strong> {{ simulation_plan.next_action }}</p>
+              <p><strong>Last decision time:</strong> {{ engine_timing.last_decision_at }}</p>
+              <p><strong>Next scan in:</strong> {{ engine_timing.next_scan_in }}</p>
+            </div>
+          </div>
+          <div class="spotlight-metrics">
+            <article>
+              <span>Budget</span>
+              <strong>EUR {{ "%.2f"|format(active_simulation.initial_notional_eur) }}</strong>
+            </article>
+            <article>
+              <span>Entry</span>
+              <strong>EUR {{ "%.4f"|format(active_simulation.entry_price) }}</strong>
+            </article>
+            <article>
+              <span>Latest</span>
+              <strong>EUR {{ "%.4f"|format(active_simulation.latest_price) }}</strong>
+            </article>
+            <article>
+              <span>PnL</span>
+              <strong class="{% if active_simulation.pnl_eur >= 0 %}profit-text{% else %}loss-text{% endif %}">
+                EUR {{ "%.2f"|format(active_simulation.pnl_eur) }} ({{ "%.2f"|format(active_simulation.pnl_pct) }}%)
+              </strong>
+            </article>
+            <article>
+              <span>Stop</span>
+              <strong>EUR {{ "%.4f"|format(active_simulation.stop_price) }}</strong>
+            </article>
+            <article>
+              <span>Take profit</span>
+              <strong>EUR {{ "%.4f"|format(active_simulation.take_profit_price) }}</strong>
+            </article>
+            <article>
+              <span>Distance to stop</span>
+              <strong>{{ "%.2f"|format(simulation_plan.distance_to_stop_pct) }}%</strong>
+            </article>
+            <article>
+              <span>Distance to target</span>
+              <strong>{{ "%.2f"|format(simulation_plan.distance_to_target_pct) }}%</strong>
+            </article>
+          </div>
+        </div>
+        {% else %}
+        <p class="mini-note">No dedicated 100 EUR simulation is running yet.</p>
+        {% endif %}
+        <div class="alert-stack">
+          <article class="alert-card alert-{{ 'success' if simulation_trigger_status.state in ['active', 'ready'] else 'warn' }}">
+            <strong>{{ simulation_trigger_status.headline }}</strong>
+            <p>{{ simulation_trigger_status.detail }}</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Simulation Performance</h2>
+        </div>
+        <div class="spotlight-metrics">
+          <article>
+            <span>Total PnL</span>
+            <strong class="{% if simulation_performance.total_pnl_eur >= 0 %}profit-text{% else %}loss-text{% endif %}">
+              EUR {{ "%.2f"|format(simulation_performance.total_pnl_eur) }}
+            </strong>
+          </article>
+          <article>
+            <span>Win rate</span>
+            <strong>{{ "%.2f"|format(simulation_performance.win_rate_pct) }}%</strong>
+          </article>
+          <article>
+            <span>Average closed run</span>
+            <strong>{{ "%.2f"|format(simulation_performance.avg_closed_pnl_pct) }}%</strong>
+          </article>
+          <article>
+            <span>Total runs</span>
+            <strong>{{ simulation_performance.total_runs }}</strong>
+          </article>
+          <article>
+            <span>Wins / losses</span>
+            <strong>{{ simulation_performance.wins }} / {{ simulation_performance.losses }}</strong>
+          </article>
+          <article>
+            <span>Active runs</span>
+            <strong>{{ simulation_performance.active_runs }}</strong>
+          </article>
+        </div>
+        <div class="two-panel-grid compact-grid">
+          <section class="panel inset-panel">
+            <div class="panel-head">
+              <h2>Best Run</h2>
+            </div>
+            {% if simulation_performance.best_run %}
+            <p>
+              {{ simulation_performance.best_run.asset.symbol }}
+              <span class="kind-chip kind-{{ simulation_performance.best_run.asset.kind.value }}">{{ simulation_performance.best_run.asset.kind.value }}</span>
+            </p>
+            <p class="profit-text">EUR {{ "%.2f"|format(simulation_performance.best_run.pnl_eur) }} ({{ "%.2f"|format(simulation_performance.best_run.pnl_pct) }}%)</p>
+            <p class="mini-note">Closed {{ simulation_performance.best_run.closed_at.strftime("%Y-%m-%d %H:%M") if simulation_performance.best_run.closed_at else "-" }}</p>
+            {% else %}
+            <p class="mini-note">No closed winning run yet.</p>
+            {% endif %}
+          </section>
+          <section class="panel inset-panel">
+            <div class="panel-head">
+              <h2>Worst Run</h2>
+            </div>
+            {% if simulation_performance.worst_run %}
+            <p>
+              {{ simulation_performance.worst_run.asset.symbol }}
+              <span class="kind-chip kind-{{ simulation_performance.worst_run.asset.kind.value }}">{{ simulation_performance.worst_run.asset.kind.value }}</span>
+            </p>
+            <p class="loss-text">EUR {{ "%.2f"|format(simulation_performance.worst_run.pnl_eur) }} ({{ "%.2f"|format(simulation_performance.worst_run.pnl_pct) }}%)</p>
+            <p class="mini-note">Closed {{ simulation_performance.worst_run.closed_at.strftime("%Y-%m-%d %H:%M") if simulation_performance.worst_run.closed_at else "-" }}</p>
+            {% else %}
+            <p class="mini-note">No closed losing run yet.</p>
+            {% endif %}
+          </section>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Simulation Grid</h2>
+          <a href="/api/simulations">JSON</a>
+        </div>
+        <p class="mini-note">Configured budgets: {{ simulation_overview.configured_budgets|join(", ") }} EUR</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Scenario</th>
+              <th>Asset</th>
+              <th>Setup</th>
+              <th>Score</th>
+              <th>PnL</th>
+              <th>Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for simulation in active_simulations %}
+            <tr>
+              <td>{{ simulation.scenario_label }}</td>
+              <td><span class="kind-chip kind-{{ simulation.asset.kind.value }}">{{ simulation.asset.kind.value }}</span> {{ simulation.asset.symbol }}</td>
+              <td>{{ simulation.setup_type }}</td>
+              <td>{{ "%.2f"|format(simulation.opened_signal_score) }}</td>
+              <td class="{% if simulation.pnl_eur >= 0 %}profit-text{% else %}loss-text{% endif %}">
+                EUR {{ "%.2f"|format(simulation.pnl_eur) }} ({{ "%.2f"|format(simulation.pnl_pct) }}%)
+              </td>
+              <td>{{ simulation.updated_at.strftime("%Y-%m-%d %H:%M") }}</td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="6">No active simulation scenarios yet.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="control-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>By Budget</h2>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Scenario</th>
+                <th>Runs</th>
+                <th>Active</th>
+                <th>Closed</th>
+                <th>PnL</th>
+                <th>Wins/Losses</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in simulation_performance.scenario_summaries %}
+              <tr>
+                <td>{{ row.label }}</td>
+                <td>{{ row.runs }}</td>
+                <td>{{ row.active }}</td>
+                <td>{{ row.closed }}</td>
+                <td class="{% if row.pnl >= 0 %}profit-text{% else %}loss-text{% endif %}">EUR {{ "%.2f"|format(row.pnl) }}</td>
+                <td>{{ row.wins }} / {{ row.losses }}</td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="6">No scenario summaries yet.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>By Pattern</h2>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Setup</th>
+                <th>Runs</th>
+                <th>Closed</th>
+                <th>PnL</th>
+                <th>Wins/Losses</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in simulation_performance.setup_summaries %}
+              <tr>
+                <td>{{ row.setup_type }}</td>
+                <td>{{ row.runs }}</td>
+                <td>{{ row.closed }}</td>
+                <td class="{% if row.pnl >= 0 %}profit-text{% else %}loss-text{% endif %}">EUR {{ "%.2f"|format(row.pnl) }}</td>
+                <td>{{ row.wins }} / {{ row.losses }}</td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="5">No setup summaries yet.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+      </section>
+
+      <section class="control-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>100 EUR simulation</h2>
+          </div>
+          <form class="stack-form" method="post" action="/actions/start-best-simulation">
+            <label>
+              Simulation budget EUR
+              <input type="number" name="notional_eur" value="100" step="5" min="25" max="10000" />
+            </label>
+            <button type="submit">Start on best asset</button>
+          </form>
+          <p class="mini-note">This is separate from the 30 EUR micro-account and follows the highest-ranked current signal.</p>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Active simulation</h2>
+            <a href="/api/simulation">JSON</a>
+          </div>
+          {% if active_simulation %}
+          <div class="risk-list">
+            <p><span class="kind-chip kind-{{ active_simulation.asset.kind.value }}">{{ active_simulation.asset.kind.value }}</span> {{ active_simulation.asset.symbol }}</p>
+            <p>Status: {{ active_simulation.status.value }}</p>
+            <p>Budget: EUR {{ "%.2f"|format(active_simulation.initial_notional_eur) }}</p>
+            <p>Entry: EUR {{ "%.4f"|format(active_simulation.entry_price) }}</p>
+            <p>Latest: EUR {{ "%.4f"|format(active_simulation.latest_price) }}</p>
+            <p class="{% if active_simulation.pnl_eur >= 0 %}profit-text{% else %}loss-text{% endif %}">
+              PnL: EUR {{ "%.2f"|format(active_simulation.pnl_eur) }} ({{ "%.2f"|format(active_simulation.pnl_pct) }}%)
+            </p>
+            <p>Stop: EUR {{ "%.4f"|format(active_simulation.stop_price) }}</p>
+            <p>Trailing stop: EUR {{ "%.4f"|format(active_simulation.trailing_stop_price) }}</p>
+            <p>Take profit: EUR {{ "%.4f"|format(active_simulation.take_profit_price) }}</p>
+            <p>{{ active_simulation.opened_reason }}</p>
+          </div>
+          {% else %}
+          <p class="mini-note">No dedicated 100 EUR simulation is running yet.</p>
+          {% endif %}
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Simulation alerts</h2>
+            <a href="/api/simulation/alerts">JSON</a>
+          </div>
+          <div class="alert-stack">
+            {% for alert in simulation_alerts %}
+            <article class="alert-card alert-{{ alert.level }}">
+              <strong>{{ alert.title }}</strong>
+              <p>{{ alert.message }}</p>
+              <span>{{ alert.created_at.strftime("%Y-%m-%d %H:%M") }}</span>
+            </article>
+            {% else %}
+            <p class="mini-note">Profit and loss notifications will show up here.</p>
+            {% endfor %}
+          </div>
+        </section>
+      </section>
+
+      <section class="control-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Trade controls</h2>
+          </div>
+          <form class="stack-form" method="post" action="/actions/simulate-buy">
+            <label>
+              Asset
+              <select name="asset_symbol">
+                {% for asset in crypto_assets %}
+                <option value="{{ asset.symbol }}">{{ asset.symbol }}</option>
+                {% endfor %}
+                {% for asset in etf_assets %}
+                <option value="{{ asset.symbol }}">{{ asset.symbol }} (ETF)</option>
+                {% endfor %}
+                {% for asset in stock_assets %}
+                <option value="{{ asset.symbol }}">{{ asset.symbol }} (Stock)</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>
+              Demo buy EUR
+              <input type="number" name="notional_eur" value="5" step="0.5" min="1" max="5" />
+            </label>
+            <button type="submit">Simulate buy</button>
+          </form>
+
+          <form class="stack-form" method="post" action="/actions/simulate-sell">
+            <label>
+              Asset
+              <select name="asset_symbol">
+                {% for asset in crypto_assets %}
+                <option value="{{ asset.symbol }}">{{ asset.symbol }}</option>
+                {% endfor %}
+                {% for asset in etf_assets %}
+                <option value="{{ asset.symbol }}">{{ asset.symbol }} (ETF)</option>
+                {% endfor %}
+                {% for asset in stock_assets %}
+                <option value="{{ asset.symbol }}">{{ asset.symbol }} (Stock)</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>
+              Exit mode
+              <select name="outcome">
+                <option value="market">Sell now</option>
+                <option value="profit">Close at take profit</option>
+                <option value="loss">Close at stop loss</option>
+              </select>
+            </label>
+            <button type="submit">Simulate sell</button>
+          </form>
+
+          <form class="stack-form" method="post" action="/actions/run-engine">
+            <button type="submit">Run auto engine now</button>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Demo preview</h2>
+          </div>
+          <form class="stack-form" method="post" action="/actions/demo-preview">
+            <label>
+              Asset
+              <select name="asset_symbol">
+                {% for asset in crypto_assets %}
+                <option value="{{ asset.symbol }}">{{ asset.symbol }}</option>
+                {% endfor %}
+                {% for asset in etf_assets %}
+                <option value="{{ asset.symbol }}">{{ asset.symbol }} (ETF)</option>
+                {% endfor %}
+                {% for asset in stock_assets %}
+                <option value="{{ asset.symbol }}">{{ asset.symbol }} (Stock)</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>
+              Notional EUR
+              <input type="number" name="notional_eur" value="5" step="0.5" min="1" max="10" />
+            </label>
+            <label>
+              Scenario %
+              <input type="number" name="scenario_pct" value="2" step="0.5" min="-10" max="10" />
+            </label>
+            <button type="submit">Preview roundtrip</button>
+          </form>
+          {% if demo_preview %}
+          <div class="preview-box">
+            <p><strong>{{ demo_preview.asset_symbol }}</strong> preview without saving trades.</p>
+            <p>Entry: EUR {{ "%.2f"|format(demo_preview.entry_price) }} | Exit: EUR {{ "%.2f"|format(demo_preview.exit_price) }}</p>
+            <p>Notional: EUR {{ "%.2f"|format(demo_preview.notional_eur) }} | Qty: {{ demo_preview.quantity }}</p>
+            <p>PnL: EUR {{ "%.4f"|format(demo_preview.pnl_eur) }} ({{ "%.2f"|format(demo_preview.pnl_pct) }}%)</p>
+          </div>
+          {% endif %}
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Broker readiness</h2>
+          </div>
+          <div class="risk-list">
+            <p>Provider: {{ broker_status.provider }}</p>
+            <p>Mode: {{ broker_status.mode }}</p>
+            <p>Enabled: {{ "yes" if broker_status.enabled else "no" }}</p>
+            <p>Configured: {{ "yes" if broker_status.configured else "no" }}</p>
+            <p>Connected: {{ "yes" if broker_status.connected else "no" }}</p>
+            <p>Status: {{ broker_status.account_status or "-" }}</p>
+            <p>Buying power: {{ broker_status.buying_power or "-" }}</p>
+            <p>Execution target: {{ broker_capabilities.execution_target }}</p>
+            <p>{{ broker_status.message }}</p>
+          </div>
+        </section>
+      </section>
+
+      <section class="control-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Risk guardrails</h2>
+          </div>
+          <div class="risk-list">
+            <p>Reserve cash: EUR {{ "%.2f"|format(summary.reserve_cash_eur) }}</p>
+            <p>Stop loss: {{ "%.2f"|format(summary.stop_loss_pct * 100) }}%</p>
+            <p>Take profit: {{ "%.2f"|format(summary.take_profit_pct * 100) }}%</p>
+            <p>Trailing stop: {{ "%.2f"|format(summary.trailing_stop_pct * 100) }}%</p>
+            <p>ETF and stock auto-trading run only in regular US market hours.</p>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Broker preview</h2>
+          </div>
+          <div class="risk-list">
+            <p>API status JSON: <a href="/api/broker/status">/api/broker/status</a></p>
+            <p>Capabilities JSON: <a href="/api/broker/capabilities">/api/broker/capabilities</a></p>
+            <p>Sample order preview: <a href="/api/broker/preview-order?symbol=SPY&side=buy&notional=5">SPY buy preview</a></p>
+            <p>Broker previews now treat the input notional as EUR and convert it to USD before building the Alpaca payload.</p>
+            <p>Real broker execution stays disabled by default until you explicitly switch it on in `.env`.</p>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Execution mode</h2>
+          </div>
+          <div class="risk-list">
+            <p>Current source of truth: internal paper trading ledger.</p>
+            <p>External broker adapter is prepared as a sidecar integration layer.</p>
+            <p>Submit enabled: {{ "yes" if broker_capabilities.submit_enabled else "no" }}</p>
+            <p>Live guard active: {{ "yes" if broker_capabilities.live_guard_enabled else "no" }}</p>
+            <p>Reconciliation JSON: <a href="/api/execution/reconciliation/details">/api/execution/reconciliation/details</a></p>
+            <p>Broker-bound ETF and stock notional is FX-converted from EUR to USD with a small safety buffer.</p>
+          </div>
+        </section>
+      </section>
+
+      <section class="control-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Broker submit test</h2>
+          </div>
+          <form class="stack-form" method="post" action="/api/broker/submit-order">
+            <label>
+              Symbol
+              <select name="symbol">
+                {% for asset in etf_assets %}
+                <option value="{{ asset.symbol }}">{{ asset.symbol }} (ETF)</option>
+                {% endfor %}
+                {% for asset in stock_assets %}
+                <option value="{{ asset.symbol }}">{{ asset.symbol }} (Stock)</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>
+              Side
+              <select name="side">
+                <option value="buy">Buy</option>
+                <option value="sell">Sell</option>
+              </select>
+            </label>
+            <label>
+              Notional EUR
+              <input type="number" name="notional" value="5" step="0.5" min="1" max="25" />
+            </label>
+            <label>
+              Dry run
+              <select name="dry_run">
+                <option value="true">True</option>
+                <option value="false">False</option>
+              </select>
+            </label>
+            <button type="submit">Submit broker test</button>
+          </form>
+        </section>
+      </section>
+
+      <section class="two-panel-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Crypto market</h2>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Price</th>
+                <th>Change</th>
+                <th>Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in crypto_market %}
+              <tr>
+                <td><span class="kind-chip kind-crypto">Crypto</span> {{ row.symbol }}</td>
+                <td>{% if row.price is not none %}EUR {{ "%.2f"|format(row.price) }}{% else %}-{% endif %}</td>
+                <td>{% if row.change_24h_pct is not none %}{{ "%.2f"|format(row.change_24h_pct) }}%{% else %}-{% endif %}</td>
+                <td>{{ row.source }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>ETF market</h2>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Price</th>
+                <th>Change</th>
+                <th>Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in etf_market %}
+              <tr>
+                <td><span class="kind-chip kind-etf">ETF</span> {{ row.symbol }}</td>
+                <td>{% if row.price is not none %}EUR {{ "%.2f"|format(row.price) }}{% else %}-{% endif %}</td>
+                <td>{% if row.change_24h_pct is not none %}{{ "%.2f"|format(row.change_24h_pct) }}%{% else %}-{% endif %}</td>
+                <td>{{ row.source }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Stock market</h2>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Asset</th>
+              <th>Price</th>
+              <th>Change</th>
+              <th>Source</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in stock_market %}
+            <tr>
+              <td><span class="kind-chip kind-stock">Stock</span> {{ row.symbol }}</td>
+              <td>{% if row.price is not none %}EUR {{ "%.2f"|format(row.price) }}{% else %}-{% endif %}</td>
+              <td>{% if row.change_24h_pct is not none %}{{ "%.2f"|format(row.change_24h_pct) }}%{% else %}-{% endif %}</td>
+              <td>{{ row.source }}</td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="4">No stock quotes yet.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="two-panel-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Crypto news</h2>
+            <a href="/api/news">JSON</a>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Asset</th>
+                <th>Title</th>
+                <th>Sentiment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in crypto_news_items %}
+              <tr>
+                <td>{{ item.published_at.strftime("%Y-%m-%d %H:%M") }}</td>
+                <td>{{ item.asset.symbol }}</td>
+                <td><a class="news-link" href="{{ item.url }}" target="_blank" rel="noreferrer">{{ item.title }}</a></td>
+                <td>{{ "%.2f"|format(item.sentiment_score) }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>ETF news</h2>
+            <a href="/api/news">JSON</a>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Asset</th>
+                <th>Title</th>
+                <th>Sentiment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in etf_news_items %}
+              <tr>
+                <td>{{ item.published_at.strftime("%Y-%m-%d %H:%M") }}</td>
+                <td>{{ item.asset.symbol }}</td>
+                <td><a class="news-link" href="{{ item.url }}" target="_blank" rel="noreferrer">{{ item.title }}</a></td>
+                <td>{{ "%.2f"|format(item.sentiment_score) }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Stock news</h2>
+            <a href="/api/news">JSON</a>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Asset</th>
+                <th>Title</th>
+                <th>Sentiment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in stock_news_items %}
+              <tr>
+                <td>{{ item.published_at.strftime("%Y-%m-%d %H:%M") }}</td>
+                <td>{{ item.asset.symbol }}</td>
+                <td><a class="news-link" href="{{ item.url }}" target="_blank" rel="noreferrer">{{ item.title }}</a></td>
+                <td>{{ "%.2f"|format(item.sentiment_score) }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+      </section>
+
+      <section class="two-panel-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Crypto signals</h2>
+            <a href="/api/signals">JSON</a>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Action</th>
+                <th>Score</th>
+                <th>Why</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for signal in crypto_signals %}
+              <tr>
+                <td>{{ signal.asset.symbol }}</td>
+                <td class="pill pill-{{ signal.action.value }}">{{ signal.action.value }}</td>
+                <td>{{ "%.2f"|format(signal.score) }}</td>
+                <td>{{ signal.rationale }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>ETF signals</h2>
+            <a href="/api/signals">JSON</a>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Action</th>
+                <th>Score</th>
+                <th>Why</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for signal in etf_signals %}
+              <tr>
+                <td>{{ signal.asset.symbol }}</td>
+                <td class="pill pill-{{ signal.action.value }}">{{ signal.action.value }}</td>
+                <td>{{ "%.2f"|format(signal.score) }}</td>
+                <td>{{ signal.rationale }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Stock signals</h2>
+            <a href="/api/signals">JSON</a>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Action</th>
+                <th>Score</th>
+                <th>Why</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for signal in stock_signals %}
+              <tr>
+                <td>{{ signal.asset.symbol }}</td>
+                <td class="pill pill-{{ signal.action.value }}">{{ signal.action.value }}</td>
+                <td>{{ "%.2f"|format(signal.score) }}</td>
+                <td>{{ signal.rationale }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Trades</h2>
+          <a href="/api/trades">JSON</a>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Asset</th>
+              <th>Type</th>
+              <th>Side</th>
+              <th>Status</th>
+              <th>Notional</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for trade in trades %}
+            <tr>
+              <td>{{ trade.executed_at.strftime("%Y-%m-%d %H:%M") }}</td>
+              <td>{{ trade.asset.symbol }}</td>
+              <td><span class="kind-chip kind-{{ trade.asset.kind.value }}">{{ trade.asset.kind.value }}</span></td>
+              <td>{{ trade.side.value }}</td>
+              <td>{{ trade.status.value }}</td>
+              <td>EUR {{ "%.2f"|format(trade.notional_eur) }}</td>
+              <td>{{ trade.reason }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Positions</h2>
+          <a href="/api/positions">JSON</a>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Asset</th>
+              <th>Status</th>
+              <th>Type</th>
+              <th>Entry</th>
+              <th>Stop</th>
+              <th>Target</th>
+              <th>PnL</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for position in positions %}
+            <tr>
+              <td>{{ position.asset.symbol }}</td>
+              <td>{{ position.status.value }}</td>
+              <td><span class="kind-chip kind-{{ position.asset.kind.value }}">{{ position.asset.kind.value }}</span></td>
+              <td>{{ "%.4f"|format(position.entry_price) }}</td>
+              <td>{{ "%.4f"|format(position.stop_loss) }}</td>
+              <td>{{ "%.4f"|format(position.take_profit) }}</td>
+              <td>{{ "%.4f"|format(position.pnl_eur or 0) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+    </main>
+    <script>
+      (function () {
+        const card = document.getElementById("active-demo-position-card");
+        if (!card) return;
+
+        const setText = (id, value) => {
+          const el = document.getElementById(id);
+          if (el && value !== undefined && value !== null) el.textContent = value;
+        };
+
+        const setPnl = (eur, pct) => {
+          const el = document.getElementById("active-demo-pnl");
+          if (!el) return;
+          el.textContent = `EUR ${eur}`;
+          el.classList.remove("profit-text", "loss-text");
+          el.classList.add(Number(eur) >= 0 ? "profit-text" : "loss-text");
+          setText("active-demo-pnl-pct", pct);
+        };
+
+        const refreshCard = async () => {
+          try {
+            const response = await fetch("/api/demo/active-position", { cache: "no-store" });
+            if (!response.ok) return;
+            const data = await response.json();
+            if (!data) return;
+            setText("active-demo-symbol", data.asset_symbol);
+            setText("active-demo-invested", Number(data.invested_notional_eur).toFixed(2));
+            setText("active-demo-value", data.current_value_eur == null ? "n/a" : Number(data.current_value_eur).toFixed(2));
+            setText("active-demo-entry", Number(data.entry_price).toFixed(2));
+            setText("active-demo-qty", Number(data.quantity).toFixed(8));
+            setText("active-demo-current", data.current_price == null ? "n/a" : Number(data.current_price).toFixed(2));
+            setText("active-demo-stop", Number(data.stop_loss).toFixed(2));
+            setText("active-demo-target", Number(data.take_profit).toFixed(2));
+            setPnl(Number(data.unrealized_pnl_eur || 0).toFixed(4), Number(data.unrealized_pnl_pct || 0).toFixed(2));
+          } catch (_) {
+          }
+        };
+
+        refreshCard();
+        window.setInterval(refreshCard, 5000);
+      })();
+    </script>
+  </body>
+</html>
