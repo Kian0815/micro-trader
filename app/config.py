@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     live_emergency_stop: bool = True
     live_runbook_acknowledged: bool = False
     live_alerts_configured: bool = False
+    operator_alert_webhook_url: str = ""
+    operator_alert_events_raw: str = Field(
+        default="worker_failure,trade_fill,trade_rejection",
+        alias="OPERATOR_ALERT_EVENTS",
+    )
     alpaca_api_key: str = ""
     alpaca_api_secret: str = ""
     alpaca_base_url: str = ""
@@ -132,6 +137,13 @@ class Settings(BaseSettings):
             if amount > 0:
                 budgets.append(amount)
         return budgets or [100.0]
+
+    @property
+    def operator_alert_events(self) -> set[str]:
+        allowed = {"worker_failure", "trade_fill", "trade_rejection"}
+        parsed = {item.strip().lower() for item in self.operator_alert_events_raw.split(",") if item.strip()}
+        filtered = parsed & allowed
+        return filtered or {"worker_failure", "trade_fill", "trade_rejection"}
 
     @property
     def asset_kind_exposure_limits(self) -> dict[str, float]:

@@ -309,6 +309,29 @@ class LiveDeploymentReadinessOut(BaseModel):
     checks: list[LiveDeploymentCheckOut]
 
 
+class OperatorAlertPolicyOut(BaseModel):
+    generated_at: datetime
+    configured: bool
+    webhook_enabled: bool
+    events: list[str]
+    coverage: list[str]
+    message: str
+
+
+class GoLiveRunbookOut(BaseModel):
+    generated_at: datetime
+    title: str
+    objective: str
+    first_capital_eur: float
+    max_positions: int
+    max_daily_loss_eur: float
+    emergency_stop_active: bool
+    env_changes: list[dict]
+    preflight_steps: list[str]
+    first_day_rules: list[str]
+    rollback_steps: list[str]
+
+
 class DemoPreviewOut(BaseModel):
     asset_symbol: str
     entry_price: float

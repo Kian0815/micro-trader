@@ -50,6 +50,8 @@ from app.schemas import (
     ApprovalFocusReportOut,
     LaunchReadinessReportOut,
     LiveDeploymentReadinessOut,
+    GoLiveRunbookOut,
+    OperatorAlertPolicyOut,
     AssetOut,
     BenchmarkReportOut,
     BrokerCapabilitiesOut,
@@ -81,6 +83,7 @@ from app.services.evaluation import StrategyProofService
 from app.services.events import StateEventService
 from app.services.execution import ExecutionIntentService
 from app.services.opportunity import BestOpportunitySelector
+from app.services.operator_alerts import build_operator_alert_service
 from app.services.portfolio import PortfolioService
 from app.services.reconciliation import ReconciliationService
 from app.services.risk import RiskEngine
@@ -154,6 +157,10 @@ def build_trader() -> PaperTrader:
 
 def build_execution_service() -> ExecutionIntentService:
     return ExecutionIntentService(settings)
+
+
+def build_operator_alerts():
+    return build_operator_alert_service(settings)
 
 
 def build_state_event_service() -> StateEventService:
@@ -283,6 +290,8 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         broker_status=broker_status,
         reconciliation_status=reconciliation_status,
     )
+    operator_alert_policy = _operator_alert_policy()
+    go_live_runbook = _go_live_runbook()
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -333,6 +342,8 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             "approval_focus": approval_focus,
             "launch_readiness": launch_readiness,
             "live_deployment": live_deployment,
+            "operator_alert_policy": operator_alert_policy,
+            "go_live_runbook": go_live_runbook,
             "setup_scorecards": setup_scorecards,
             "setup_walkforward": setup_walkforward,
             "benchmark_report": benchmark_report,
@@ -401,6 +412,8 @@ def live_monitor(request: Request, db: Session = Depends(get_db)):
         broker_status=broker_status,
         reconciliation_status=reconciliation_status,
     )
+    operator_alert_policy = _operator_alert_policy()
+    go_live_runbook = _go_live_runbook()
     return templates.TemplateResponse(
         request,
         "live.html",
@@ -433,6 +446,8 @@ def live_monitor(request: Request, db: Session = Depends(get_db)):
             "approval_focus": approval_focus,
             "launch_readiness": launch_readiness,
             "live_deployment": live_deployment,
+            "operator_alert_policy": operator_alert_policy,
+            "go_live_runbook": go_live_runbook,
             "setup_scorecards": setup_scorecards,
             "setup_walkforward": setup_walkforward,
             "benchmark_report": benchmark_report,
@@ -696,6 +711,16 @@ def get_live_deployment_readiness(db: Session = Depends(get_db)):
             reconciliation_status=reconciliation_status,
         )
     )
+
+
+@app.get("/api/operator-alerts", response_model=OperatorAlertPolicyOut)
+def get_operator_alerts():
+    return OperatorAlertPolicyOut(**_operator_alert_policy())
+
+
+@app.get("/api/go-live-runbook", response_model=GoLiveRunbookOut)
+def get_go_live_runbook():
+    return GoLiveRunbookOut(**_go_live_runbook())
 
 
 @app.get("/api/opportunity/best")
@@ -2638,6 +2663,68 @@ def _live_deployment_readiness(*, launch_readiness: dict, broker_status, reconci
         "checks_total": checks_total,
         "next_step": next_step,
         "checks": checks,
+    }
+
+
+def _operator_alert_policy() -> dict:
+    status = build_operator_alerts().status()
+    coverage = [
+        "worker failure -> webhook event worker_failure",
+        "trade fill -> webhook event trade_fill",
+        "trade rejection -> webhook event trade_rejection",
+    ]
+    return {
+        "generated_at": datetime.utcnow(),
+        "configured": status.configured,
+        "webhook_enabled": status.webhook_enabled,
+        "events": status.events,
+        "coverage": coverage,
+        "message": status.message,
+    }
+
+
+def _go_live_runbook() -> dict:
+    first_capital_eur = min(settings.max_notional_per_trade_eur, 25.0)
+    return {
+        "generated_at": datetime.utcnow(),
+        "title": "Tiny live-capital go-live runbook",
+        "objective": "Move from guarded paper into the smallest safe live deployment without releasing the whole system at once.",
+        "first_capital_eur": round(first_capital_eur, 2),
+        "max_positions": 1,
+        "max_daily_loss_eur": round(min(settings.max_daily_loss_eur, max(first_capital_eur * 0.2, 5.0)), 2),
+        "emergency_stop_active": settings.live_emergency_stop,
+        "env_changes": [
+            {"name": "BROKER_PROVIDER", "current": settings.broker_provider, "target": "alpaca"},
+            {"name": "BROKER_ENABLED", "current": str(settings.broker_enabled).lower(), "target": "true"},
+            {"name": "BROKER_EXECUTION_TARGET", "current": settings.broker_execution_target, "target": "broker"},
+            {"name": "BROKER_MODE", "current": settings.broker_mode, "target": "live"},
+            {"name": "BROKER_LIVE_CONFIRMED", "current": str(settings.broker_live_confirmed).lower(), "target": "true"},
+            {"name": "LIVE_RUNBOOK_ACKNOWLEDGED", "current": str(settings.live_runbook_acknowledged).lower(), "target": "true"},
+            {"name": "LIVE_ALERTS_CONFIGURED", "current": str(settings.live_alerts_configured).lower(), "target": "true"},
+            {"name": "LIVE_EMERGENCY_STOP", "current": str(settings.live_emergency_stop).lower(), "target": "false only at final release moment"},
+            {"name": "MAX_OPEN_POSITIONS", "current": str(settings.max_open_positions), "target": "1"},
+            {"name": "MAX_NOTIONAL_PER_TRADE_EUR", "current": str(settings.max_notional_per_trade_eur), "target": f"{first_capital_eur:.2f}"},
+        ],
+        "preflight_steps": [
+            "Verify one entry lane is approved and stays stable for multiple worker cycles.",
+            "Confirm broker connectivity, reconciliation clean state, and zero failed intents.",
+            "Set a real operator webhook URL and validate worker_failure, trade_fill, and trade_rejection test deliveries.",
+            "Keep LIVE_EMERGENCY_STOP=true while switching the rest of the live env flags into place.",
+            "Restart the stack and confirm the dashboard still shows live deployment blocked only by the emergency stop.",
+        ],
+        "first_day_rules": [
+            f"Start with no more than EUR {first_capital_eur:.2f} notional on the first live entry.",
+            "Allow only one live position at a time for the first session.",
+            "Watch the first fill, stop, and reconciliation cycle manually before leaving the system alone.",
+            "If any rejection, mismatch, stale-data breach, or worker error occurs, stop immediately and return to paper mode.",
+        ],
+        "rollback_steps": [
+            "Set LIVE_EMERGENCY_STOP=true immediately.",
+            "Set BROKER_EXECUTION_TARGET=internal and BROKER_MODE=paper.",
+            "Set BROKER_LIVE_CONFIRMED=false.",
+            "Restart api and worker, then confirm the live deployment checklist is red again and broker live mode is off.",
+            "Review the latest execution intents, broker orders, reconciliation snapshot, and worker logs before attempting another live session.",
+        ],
     }
 
 

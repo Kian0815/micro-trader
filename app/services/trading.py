@@ -552,7 +552,11 @@ class PaperTrader:
         if not created and intent.status == ExecutionIntentStatus.FILLED and intent.position:
             return intent.position
         if not self.execution_service.internal_execution_allowed:
-            self.execution_service.mark_failed(intent, error_message="Internal paper execution is disabled.")
+            self.execution_service.mark_failed(
+                intent,
+                error_message="Internal paper execution is disabled.",
+                asset_symbol=asset.symbol,
+            )
             raise ValueError("Internal paper execution is disabled.")
         quantity = round(notional_eur / price, 8)
         position = Position(
@@ -564,7 +568,7 @@ class PaperTrader:
         )
         db.add(position)
         db.flush()
-        self.execution_service.mark_filled(intent, quantity=quantity, position=position)
+        self.execution_service.mark_filled(intent, quantity=quantity, position=position, asset_symbol=asset.symbol)
         self.execution_service.record_trade(
             db,
             asset_id=asset.id,
@@ -609,7 +613,7 @@ class PaperTrader:
         position.closed_at = datetime.utcnow()
         position.exit_price = price
         position.pnl_eur = pnl
-        self.execution_service.mark_filled(intent, quantity=position.quantity, position=position)
+        self.execution_service.mark_filled(intent, quantity=position.quantity, position=position, asset_symbol=asset.symbol)
         self.execution_service.record_trade(
             db,
             asset_id=position.asset_id,

@@ -620,6 +620,63 @@
 
       <section class="panel">
         <div class="panel-head">
+          <h2>Operator Alerts</h2>
+          <a href="/api/operator-alerts">JSON</a>
+        </div>
+        <div class="story-stream">
+          <article class="story-card">
+            <div class="story-head">
+              <strong>Alert transport</strong>
+              <span class="status-badge status-{{ 'ready' if operator_alert_policy.webhook_enabled else 'disabled' }}">{{ 'configured' if operator_alert_policy.webhook_enabled else 'missing' }}</span>
+            </div>
+            <p>{{ operator_alert_policy.message }}</p>
+            <div class="threshold-list">
+              {% for event_name in operator_alert_policy.events %}
+              <span class="threshold-chip {% if operator_alert_policy.configured %}threshold-good{% else %}threshold-bad{% endif %}">{{ event_name }}</span>
+              {% endfor %}
+            </div>
+          </article>
+          {% for item in operator_alert_policy.coverage %}
+          <article class="story-card">
+            <div class="story-head"><strong>{{ item }}</strong></div>
+            <p>Operator webhook coverage for this event path.</p>
+          </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Go Live Runbook</h2>
+          <a href="/api/go-live-runbook">JSON</a>
+        </div>
+        <div class="story-stream">
+          <article class="story-card">
+            <div class="story-head"><strong>{{ go_live_runbook.title }}</strong></div>
+            <p>{{ go_live_runbook.objective }}</p>
+            <div class="threshold-list">
+              <span class="threshold-chip threshold-good">first capital EUR {{ "%.2f"|format(go_live_runbook.first_capital_eur) }}</span>
+              <span class="threshold-chip threshold-good">max positions {{ go_live_runbook.max_positions }}</span>
+              <span class="threshold-chip threshold-bad">max daily loss EUR {{ "%.2f"|format(go_live_runbook.max_daily_loss_eur) }}</span>
+            </div>
+          </article>
+          <article class="story-card">
+            <div class="story-head"><strong>Env flips</strong></div>
+            {% for item in go_live_runbook.env_changes %}
+            <p><strong>{{ item.name }}</strong>: {{ item.current }} -> {{ item.target }}</p>
+            {% endfor %}
+          </article>
+          <article class="story-card">
+            <div class="story-head"><strong>Rollback</strong></div>
+            {% for step in go_live_runbook.rollback_steps %}
+            <p>{{ loop.index }}. {{ step }}</p>
+            {% endfor %}
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
           <h2>Setup Approval Board</h2>
           <a href="/api/setups/scorecards">JSON</a>
         </div>

@@ -16,6 +16,7 @@ from app.db import (
 )
 from app.engine import run_engine_cycle
 from app.models import EngineRun
+from app.services.operator_alerts import build_operator_alert_service
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 def main() -> None:
     settings = get_settings()
+    operator_alerts = build_operator_alert_service(settings)
     Base.metadata.create_all(bind=engine)
     ensure_asset_kind_enum()
     ensure_signal_outcome_schema()
@@ -38,6 +40,16 @@ def main() -> None:
                 logger.info("Engine cycle complete: %s", result)
         except Exception:
             logger.exception("Engine cycle failed")
+            operator_alerts.emit(
+                event_type="worker_failure",
+                severity="danger",
+                title="Worker cycle failed",
+                message="Micro Trader worker cycle failed. Check VM logs and the latest engine run traceback immediately.",
+                details={
+                    "mode": settings.broker_mode,
+                    "execution_target": settings.broker_execution_target,
+                },
+            )
             with Session(engine) as db:
                 db.add(
                     EngineRun(

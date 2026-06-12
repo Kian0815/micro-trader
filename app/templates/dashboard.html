@@ -931,6 +931,98 @@
 
       <section class="panel">
         <div class="panel-head">
+          <h2>Operator Alerts</h2>
+          <a href="/api/operator-alerts">JSON</a>
+        </div>
+        <div class="spotlight-metrics proof-metrics">
+          <article>
+            <span>Webhook</span>
+            <strong class="status-badge status-{{ 'ready' if operator_alert_policy.webhook_enabled else 'disabled' }}">{{ 'configured' if operator_alert_policy.webhook_enabled else 'missing' }}</strong>
+          </article>
+          <article>
+            <span>Declared events</span>
+            <strong>{{ operator_alert_policy.events|length }}</strong>
+            <p class="mini-note">{{ operator_alert_policy.events|join(", ") }}</p>
+          </article>
+        </div>
+        <div class="alert-stack">
+          <article class="alert-card alert-{{ 'success' if operator_alert_policy.configured else 'warn' }}">
+            <strong>{{ operator_alert_policy.message }}</strong>
+          </article>
+        </div>
+        <div class="threshold-list">
+          {% for item in operator_alert_policy.coverage %}
+          <span class="threshold-chip {% if operator_alert_policy.configured %}threshold-good{% else %}threshold-bad{% endif %}">{{ item }}</span>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Go Live Runbook</h2>
+          <a href="/api/go-live-runbook">JSON</a>
+        </div>
+        <p class="mini-note">{{ go_live_runbook.objective }}</p>
+        <div class="spotlight-metrics proof-metrics">
+          <article>
+            <span>First capital</span>
+            <strong>EUR {{ "%.2f"|format(go_live_runbook.first_capital_eur) }}</strong>
+          </article>
+          <article>
+            <span>Max positions</span>
+            <strong>{{ go_live_runbook.max_positions }}</strong>
+          </article>
+          <article>
+            <span>Max daily loss</span>
+            <strong>EUR {{ "%.2f"|format(go_live_runbook.max_daily_loss_eur) }}</strong>
+          </article>
+          <article>
+            <span>Emergency stop</span>
+            <strong class="status-badge status-{{ 'disabled' if go_live_runbook.emergency_stop_active else 'ready' }}">{{ 'active' if go_live_runbook.emergency_stop_active else 'released' }}</strong>
+          </article>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Env var</th>
+              <th>Current</th>
+              <th>Go-live target</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in go_live_runbook.env_changes %}
+            <tr>
+              <td>{{ item.name }}</td>
+              <td>{{ item.current }}</td>
+              <td>{{ item.target }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <div class="story-stream">
+          <article class="story-card">
+            <div class="story-head"><strong>Preflight</strong></div>
+            {% for step in go_live_runbook.preflight_steps %}
+            <p>{{ loop.index }}. {{ step }}</p>
+            {% endfor %}
+          </article>
+          <article class="story-card">
+            <div class="story-head"><strong>First day rules</strong></div>
+            {% for step in go_live_runbook.first_day_rules %}
+            <p>{{ loop.index }}. {{ step }}</p>
+            {% endfor %}
+          </article>
+          <article class="story-card">
+            <div class="story-head"><strong>Rollback</strong></div>
+            {% for step in go_live_runbook.rollback_steps %}
+            <p>{{ loop.index }}. {{ step }}</p>
+            {% endfor %}
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
           <h2>Setup Proof</h2>
           <a href="/api/setups/scorecards">JSON</a>
         </div>

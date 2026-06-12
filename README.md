@@ -170,6 +170,8 @@ BROKER_LIVE_CONFIRMED=false
 LIVE_EMERGENCY_STOP=true
 LIVE_RUNBOOK_ACKNOWLEDGED=false
 LIVE_ALERTS_CONFIGURED=false
+OPERATOR_ALERT_WEBHOOK_URL=
+OPERATOR_ALERT_EVENTS=worker_failure,trade_fill,trade_rejection
 ALPACA_API_KEY=
 ALPACA_API_SECRET=
 ALPACA_BASE_URL=
@@ -199,6 +201,8 @@ Notes:
 - `BROKER_LIVE_CONFIRMED=false` blocks live broker submission until you explicitly remove that guard.
 - `LIVE_EMERGENCY_STOP=true` is a second hard block that prevents live submission even if broker live mode is turned on.
 - `LIVE_RUNBOOK_ACKNOWLEDGED=false` and `LIVE_ALERTS_CONFIGURED=false` keep the live deployment checklist red until the operating process is intentionally prepared.
+- `OPERATOR_ALERT_WEBHOOK_URL` lets the VM send operator notifications to a webhook receiver for worker failure, fill, and rejection events.
+- `OPERATOR_ALERT_EVENTS` controls which of `worker_failure`, `trade_fill`, and `trade_rejection` can emit webhook alerts.
 
 ## Main endpoints
 

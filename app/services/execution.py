@@ -8,12 +8,14 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.models import Asset, ExecutionIntent, ExecutionIntentStatus, Position, Signal, Trade, TradeMode, TradeSide, TradeStatus
 from app.services.brokers import build_broker_adapter
+from app.services.operator_alerts import build_operator_alert_service
 
 
 class ExecutionIntentService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.broker_adapter = build_broker_adapter(settings)
+        self.operator_alert_service = build_operator_alert_service(settings)
 
     @property
     def internal_execution_allowed(self) -> bool:
@@ -76,10 +78,23 @@ class ExecutionIntentService:
         intent.error_message = error_message
         intent.updated_at = datetime.utcnow()
 
-    def mark_failed(self, intent: ExecutionIntent, *, error_message: str) -> None:
+    def mark_failed(self, intent: ExecutionIntent, *, error_message: str, asset_symbol: str | None = None) -> None:
         intent.status = ExecutionIntentStatus.FAILED
         intent.error_message = error_message
         intent.updated_at = datetime.utcnow()
+        self.operator_alert_service.emit(
+            event_type="trade_rejection",
+            severity="danger",
+            title=f"{asset_symbol or 'Trade'} intent failed",
+            message=error_message,
+            details={
+                "intent_key": intent.intent_key,
+                "asset_symbol": asset_symbol,
+                "side": intent.side.value,
+                "execution_target": intent.execution_target,
+                "mode": intent.mode,
+            },
+        )
 
     def mark_filled(
         self,
@@ -89,6 +104,7 @@ class ExecutionIntentService:
         position: Position | None = None,
         broker_order_id: str | None = None,
         broker_status: str | None = None,
+        asset_symbol: str | None = None,
     ) -> None:
         intent.status = ExecutionIntentStatus.FILLED
         intent.quantity = quantity
@@ -96,6 +112,22 @@ class ExecutionIntentService:
         intent.broker_order_id = broker_order_id
         intent.broker_status = broker_status
         intent.updated_at = datetime.utcnow()
+        self.operator_alert_service.emit(
+            event_type="trade_fill",
+            severity="ok",
+            title=f"{asset_symbol or 'Trade'} {intent.side.value} filled",
+            message=f"{asset_symbol or 'Asset'} {intent.side.value} intent marked filled in {intent.mode}/{intent.execution_target}.",
+            details={
+                "intent_key": intent.intent_key,
+                "asset_symbol": asset_symbol,
+                "side": intent.side.value,
+                "quantity": quantity,
+                "execution_target": intent.execution_target,
+                "mode": intent.mode,
+                "broker_order_id": broker_order_id,
+                "broker_status": broker_status,
+            },
+        )
 
     def record_trade(
         self,
