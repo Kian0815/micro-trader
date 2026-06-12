@@ -313,6 +313,8 @@ class OperatorAlertPolicyOut(BaseModel):
     generated_at: datetime
     configured: bool
     webhook_enabled: bool
+    transport: str
+    supported_transports: list[str]
     events: list[str]
     coverage: list[str]
     message: str

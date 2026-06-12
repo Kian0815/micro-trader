@@ -936,13 +936,18 @@
         </div>
         <div class="spotlight-metrics proof-metrics">
           <article>
-            <span>Webhook</span>
-            <strong class="status-badge status-{{ 'ready' if operator_alert_policy.webhook_enabled else 'disabled' }}">{{ 'configured' if operator_alert_policy.webhook_enabled else 'missing' }}</strong>
+            <span>Transport</span>
+            <strong class="status-badge status-{{ 'ready' if operator_alert_policy.webhook_enabled else 'disabled' }}">{{ operator_alert_policy.transport }}</strong>
           </article>
           <article>
             <span>Declared events</span>
             <strong>{{ operator_alert_policy.events|length }}</strong>
             <p class="mini-note">{{ operator_alert_policy.events|join(", ") }}</p>
+          </article>
+          <article>
+            <span>Support</span>
+            <strong>{{ operator_alert_policy.supported_transports|length }}</strong>
+            <p class="mini-note">{{ operator_alert_policy.supported_transports|join(", ") }}</p>
           </article>
         </div>
         <div class="alert-stack">

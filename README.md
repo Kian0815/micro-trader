@@ -170,7 +170,14 @@ BROKER_LIVE_CONFIRMED=false
 LIVE_EMERGENCY_STOP=true
 LIVE_RUNBOOK_ACKNOWLEDGED=false
 LIVE_ALERTS_CONFIGURED=false
+OPERATOR_ALERT_TRANSPORT=none
 OPERATOR_ALERT_WEBHOOK_URL=
+OPERATOR_ALERT_TELEGRAM_BOT_TOKEN=
+OPERATOR_ALERT_TELEGRAM_CHAT_ID=
+OPERATOR_ALERT_SLACK_WEBHOOK_URL=
+OPERATOR_ALERT_DISCORD_WEBHOOK_URL=
+OPERATOR_ALERT_WHATSAPP_BRIDGE_URL=
+OPERATOR_ALERT_SIGNAL_BRIDGE_URL=
 OPERATOR_ALERT_EVENTS=worker_failure,trade_fill,trade_rejection
 ALPACA_API_KEY=
 ALPACA_API_SECRET=
@@ -201,8 +208,26 @@ Notes:
 - `BROKER_LIVE_CONFIRMED=false` blocks live broker submission until you explicitly remove that guard.
 - `LIVE_EMERGENCY_STOP=true` is a second hard block that prevents live submission even if broker live mode is turned on.
 - `LIVE_RUNBOOK_ACKNOWLEDGED=false` and `LIVE_ALERTS_CONFIGURED=false` keep the live deployment checklist red until the operating process is intentionally prepared.
-- `OPERATOR_ALERT_WEBHOOK_URL` lets the VM send operator notifications to a webhook receiver for worker failure, fill, and rejection events.
+- `OPERATOR_ALERT_TRANSPORT` supports `telegram`, `webhook`, `slack`, `discord`, `whatsapp_bridge`, and `signal_bridge`.
+- Telegram is the simplest direct chat option and uses `OPERATOR_ALERT_TELEGRAM_BOT_TOKEN` plus `OPERATOR_ALERT_TELEGRAM_CHAT_ID`.
+- `OPERATOR_ALERT_WEBHOOK_URL`, `OPERATOR_ALERT_SLACK_WEBHOOK_URL`, and `OPERATOR_ALERT_DISCORD_WEBHOOK_URL` let the VM send operator notifications to those destinations.
+- `OPERATOR_ALERT_WHATSAPP_BRIDGE_URL` and `OPERATOR_ALERT_SIGNAL_BRIDGE_URL` are intentionally bridge-style placeholders for public-repo use. They assume you run your own approved gateway or bridge service rather than pretending Micro Trader can talk to WhatsApp or Signal natively.
 - `OPERATOR_ALERT_EVENTS` controls which of `worker_failure`, `trade_fill`, and `trade_rejection` can emit webhook alerts.
+
+### Operator alert transports
+
+- `telegram`: supported directly in the app.
+- `webhook`: generic JSON POST to your own receiver.
+- `slack`: supported through incoming webhook.
+- `discord`: supported through webhook.
+- `whatsapp_bridge`: placeholder for an external bridge or approved provider endpoint.
+- `signal_bridge`: placeholder for an external bridge or approved provider endpoint.
+
+Practical recommendation:
+
+- Use `telegram` first if you want the fastest low-friction operator alert path.
+- Use `slack` or `discord` if you already have an ops channel.
+- Use `whatsapp_bridge` or `signal_bridge` only if you already operate a compliant bridge service.
 
 ## Main endpoints
 

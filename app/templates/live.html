@@ -627,12 +627,15 @@
           <article class="story-card">
             <div class="story-head">
               <strong>Alert transport</strong>
-              <span class="status-badge status-{{ 'ready' if operator_alert_policy.webhook_enabled else 'disabled' }}">{{ 'configured' if operator_alert_policy.webhook_enabled else 'missing' }}</span>
+              <span class="status-badge status-{{ 'ready' if operator_alert_policy.webhook_enabled else 'disabled' }}">{{ operator_alert_policy.transport }}</span>
             </div>
             <p>{{ operator_alert_policy.message }}</p>
             <div class="threshold-list">
               {% for event_name in operator_alert_policy.events %}
               <span class="threshold-chip {% if operator_alert_policy.configured %}threshold-good{% else %}threshold-bad{% endif %}">{{ event_name }}</span>
+              {% endfor %}
+              {% for transport_name in operator_alert_policy.supported_transports %}
+              <span class="threshold-chip threshold-good">{{ transport_name }}</span>
               {% endfor %}
             </div>
           </article>

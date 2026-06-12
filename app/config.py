@@ -26,7 +26,14 @@ class Settings(BaseSettings):
     live_emergency_stop: bool = True
     live_runbook_acknowledged: bool = False
     live_alerts_configured: bool = False
+    operator_alert_transport: str = "none"
     operator_alert_webhook_url: str = ""
+    operator_alert_telegram_bot_token: str = ""
+    operator_alert_telegram_chat_id: str = ""
+    operator_alert_slack_webhook_url: str = ""
+    operator_alert_discord_webhook_url: str = ""
+    operator_alert_whatsapp_bridge_url: str = ""
+    operator_alert_signal_bridge_url: str = ""
     operator_alert_events_raw: str = Field(
         default="worker_failure,trade_fill,trade_rejection",
         alias="OPERATOR_ALERT_EVENTS",
@@ -144,6 +151,18 @@ class Settings(BaseSettings):
         parsed = {item.strip().lower() for item in self.operator_alert_events_raw.split(",") if item.strip()}
         filtered = parsed & allowed
         return filtered or {"worker_failure", "trade_fill", "trade_rejection"}
+
+    @property
+    def supported_operator_alert_transports(self) -> list[str]:
+        return [
+            "none",
+            "telegram",
+            "webhook",
+            "slack",
+            "discord",
+            "whatsapp_bridge",
+            "signal_bridge",
+        ]
 
     @property
     def asset_kind_exposure_limits(self) -> dict[str, float]:
