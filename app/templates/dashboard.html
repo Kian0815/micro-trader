@@ -155,6 +155,14 @@
             <span>Liquidate on breach</span>
             <strong>{{ "yes" if execution_guardrails.liquidate_on_drawdown_breach else "no" }}</strong>
           </article>
+          <article>
+            <span>Live notional cap</span>
+            <strong>EUR {{ "%.2f"|format(execution_guardrails.live_max_notional_eur) }}</strong>
+          </article>
+          <article>
+            <span>Live trade cap</span>
+            <strong>{{ execution_guardrails.live_max_trades_per_day }} / day</strong>
+          </article>
         </div>
         <p class="mini-note">{{ execution_guardrails.last_engine_message }}</p>
         {% if execution_guardrails.market_regime %}
@@ -180,6 +188,10 @@
               Stock {{ "%.0f"|format(execution_guardrails.asset_kind_exposure_limits["stock"]) }}% /
               Crypto {{ "%.0f"|format(execution_guardrails.asset_kind_exposure_limits["crypto"]) }}%
             </strong>
+          </article>
+          <article>
+            <span>Live symbol allowlist</span>
+            <strong>{{ execution_guardrails.live_allowed_symbols|join(", ") if execution_guardrails.live_allowed_symbols else "all blocked until set" }}</strong>
           </article>
         </div>
         <div class="threshold-list">
@@ -955,9 +967,69 @@
             <strong>{{ operator_alert_policy.message }}</strong>
           </article>
         </div>
+        <form class="stack-form" action="/actions/operator-alert-test" method="post">
+          <input type="hidden" name="redirect_path" value="/" />
+          <button type="submit">Send test alert</button>
+        </form>
         <div class="threshold-list">
           {% for item in operator_alert_policy.coverage %}
           <span class="threshold-chip {% if operator_alert_policy.configured %}threshold-good{% else %}threshold-bad{% endif %}">{{ item }}</span>
+          {% endfor %}
+          {% for item in operator_alert_policy.interactive_commands %}
+          <span class="threshold-chip threshold-good">{{ item }}</span>
+          {% endfor %}
+        </div>
+        {% if operator_alert_policy.interactive_commands %}
+        <p class="mini-note">Telegram command path is enabled. Send /status, /testalert, or /help to the bot.</p>
+        {% endif %}
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Execution Audit Board</h2>
+          <a href="/api/execution/audit">JSON</a>
+        </div>
+        <div class="spotlight-metrics proof-metrics">
+          <article>
+            <span>Heartbeat</span>
+            <strong class="status-badge status-{{ execution_audit.heartbeat_state }}">{{ execution_audit.heartbeat_state }}</strong>
+            <p class="mini-note">{{ execution_audit.heartbeat_message }}</p>
+          </article>
+          <article>
+            <span>Quote safety</span>
+            <strong class="status-badge status-{{ execution_audit.quote_safety_state }}">{{ execution_audit.quote_safety_state }}</strong>
+            <p class="mini-note">{{ execution_audit.quote_safety_message }}</p>
+          </article>
+          <article>
+            <span>Reconciliation</span>
+            <strong class="status-badge status-{{ execution_audit.reconciliation_state }}">{{ execution_audit.reconciliation_state }}</strong>
+            <p class="mini-note">{{ execution_audit.reconciliation_message }}</p>
+          </article>
+          <article>
+            <span>Live guard</span>
+            <strong class="status-badge status-{{ execution_audit.live_guard_state }}">{{ execution_audit.live_guard_state }}</strong>
+            <p class="mini-note">{{ execution_audit.live_guard_message }}</p>
+          </article>
+          <article>
+            <span>Intents right now</span>
+            <strong>{{ execution_audit.pending_intents }} pending / {{ execution_audit.failed_intents }} failed</strong>
+          </article>
+          <article>
+            <span>Last 24h</span>
+            <strong>{{ execution_audit.fills_24h }} fills / {{ execution_audit.skips_24h }} skips / {{ execution_audit.failed_24h }} failed</strong>
+            <p class="mini-note">{{ execution_audit.state_changes_24h }} state changes</p>
+          </article>
+        </div>
+        <div class="story-stream">
+          {% for item in execution_audit.timeline[:8] %}
+          <article class="story-card">
+            <div class="story-head">
+              <strong>{{ item.title }}</strong>
+              <span class="status-badge status-{{ item.status }}">{{ item.status }}</span>
+            </div>
+            <p>{{ item.detail }}</p>
+            <p class="mini-note">{{ item.occurred_at.strftime("%Y-%m-%d %H:%M:%S UTC") }} · {{ item.source_type }}{% if item.symbol %} · {{ item.symbol }}{% endif %}</p>
+          </article>
           {% endfor %}
         </div>
       </section>

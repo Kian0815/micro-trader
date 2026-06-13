@@ -1,3 +1,4 @@
+from datetime import datetime
 from dataclasses import dataclass
 
 import httpx
@@ -190,6 +191,10 @@ class AlpacaBrokerAdapter(BaseBrokerAdapter):
     def configured(self) -> bool:
         return bool(self.settings.alpaca_api_key and self.settings.alpaca_api_secret)
 
+    @property
+    def paper_endpoint(self) -> bool:
+        return self.settings.alpaca_endpoint_is_paper
+
     def status(self) -> BrokerStatus:
         if not self.configured:
             return BrokerStatus(
@@ -380,6 +385,25 @@ class AlpacaBrokerAdapter(BaseBrokerAdapter):
                 fx_rate_as_of=preview.fx_rate_as_of,
                 fx_buffer_pct=preview.fx_buffer_pct,
             )
+        if self.settings.broker_mode == "live" and self.paper_endpoint:
+            return BrokerOrderResult(
+                provider="alpaca",
+                mode=self.settings.broker_mode,
+                submitted=False,
+                dry_run=dry_run,
+                endpoint=preview.endpoint,
+                payload=preview.payload,
+                client_order_id=client_order_id,
+                broker_order_id=None,
+                broker_status=None,
+                message="Live mode is blocked because ALPACA_BASE_URL still points at the paper endpoint.",
+                requested_notional_eur=preview.requested_notional_eur,
+                converted_notional_usd=preview.converted_notional_usd,
+                fx_rate_eur_usd=preview.fx_rate_eur_usd,
+                fx_rate_provider=preview.fx_rate_provider,
+                fx_rate_as_of=preview.fx_rate_as_of,
+                fx_buffer_pct=preview.fx_buffer_pct,
+            )
         if self.settings.broker_mode == "live" and self.settings.live_emergency_stop:
             return BrokerOrderResult(
                 provider="alpaca",
@@ -399,6 +423,159 @@ class AlpacaBrokerAdapter(BaseBrokerAdapter):
                 fx_rate_as_of=preview.fx_rate_as_of,
                 fx_buffer_pct=preview.fx_buffer_pct,
             )
+        if self.settings.broker_mode == "live" and not self.settings.live_runbook_acknowledged:
+            return BrokerOrderResult(
+                provider="alpaca",
+                mode=self.settings.broker_mode,
+                submitted=False,
+                dry_run=dry_run,
+                endpoint=preview.endpoint,
+                payload=preview.payload,
+                client_order_id=client_order_id,
+                broker_order_id=None,
+                broker_status=None,
+                message="Live mode is blocked until LIVE_RUNBOOK_ACKNOWLEDGED=true is set explicitly.",
+                requested_notional_eur=preview.requested_notional_eur,
+                converted_notional_usd=preview.converted_notional_usd,
+                fx_rate_eur_usd=preview.fx_rate_eur_usd,
+                fx_rate_provider=preview.fx_rate_provider,
+                fx_rate_as_of=preview.fx_rate_as_of,
+                fx_buffer_pct=preview.fx_buffer_pct,
+            )
+        if self.settings.broker_mode == "live" and not self.settings.live_alerts_configured:
+            return BrokerOrderResult(
+                provider="alpaca",
+                mode=self.settings.broker_mode,
+                submitted=False,
+                dry_run=dry_run,
+                endpoint=preview.endpoint,
+                payload=preview.payload,
+                client_order_id=client_order_id,
+                broker_order_id=None,
+                broker_status=None,
+                message="Live mode is blocked until LIVE_ALERTS_CONFIGURED=true confirms operator alerts are active.",
+                requested_notional_eur=preview.requested_notional_eur,
+                converted_notional_usd=preview.converted_notional_usd,
+                fx_rate_eur_usd=preview.fx_rate_eur_usd,
+                fx_rate_provider=preview.fx_rate_provider,
+                fx_rate_as_of=preview.fx_rate_as_of,
+                fx_buffer_pct=preview.fx_buffer_pct,
+            )
+        if self.settings.broker_mode == "live" and preview.requested_notional_eur and preview.requested_notional_eur > self.settings.live_max_notional_eur:
+            return BrokerOrderResult(
+                provider="alpaca",
+                mode=self.settings.broker_mode,
+                submitted=False,
+                dry_run=dry_run,
+                endpoint=preview.endpoint,
+                payload=preview.payload,
+                client_order_id=client_order_id,
+                broker_order_id=None,
+                broker_status=None,
+                message=(
+                    f"Live mode rejected EUR {preview.requested_notional_eur:.2f} because LIVE_MAX_NOTIONAL_EUR "
+                    f"is {self.settings.live_max_notional_eur:.2f}."
+                ),
+                requested_notional_eur=preview.requested_notional_eur,
+                converted_notional_usd=preview.converted_notional_usd,
+                fx_rate_eur_usd=preview.fx_rate_eur_usd,
+                fx_rate_provider=preview.fx_rate_provider,
+                fx_rate_as_of=preview.fx_rate_as_of,
+                fx_buffer_pct=preview.fx_buffer_pct,
+            )
+        if self.settings.broker_mode == "live" and not self.settings.live_allowed_symbols:
+            return BrokerOrderResult(
+                provider="alpaca",
+                mode=self.settings.broker_mode,
+                submitted=False,
+                dry_run=dry_run,
+                endpoint=preview.endpoint,
+                payload=preview.payload,
+                client_order_id=client_order_id,
+                broker_order_id=None,
+                broker_status=None,
+                message="Live mode is blocked until LIVE_ALLOWED_SYMBOLS explicitly lists the first approved symbol(s).",
+                requested_notional_eur=preview.requested_notional_eur,
+                converted_notional_usd=preview.converted_notional_usd,
+                fx_rate_eur_usd=preview.fx_rate_eur_usd,
+                fx_rate_provider=preview.fx_rate_provider,
+                fx_rate_as_of=preview.fx_rate_as_of,
+                fx_buffer_pct=preview.fx_buffer_pct,
+            )
+        if self.settings.broker_mode == "live" and symbol.upper() not in self.settings.live_allowed_symbols:
+            return BrokerOrderResult(
+                provider="alpaca",
+                mode=self.settings.broker_mode,
+                submitted=False,
+                dry_run=dry_run,
+                endpoint=preview.endpoint,
+                payload=preview.payload,
+                client_order_id=client_order_id,
+                broker_order_id=None,
+                broker_status=None,
+                message=(
+                    f"Live mode rejected {symbol.upper()} because it is outside LIVE_ALLOWED_SYMBOLS "
+                    f"({', '.join(sorted(self.settings.live_allowed_symbols))})."
+                ),
+                requested_notional_eur=preview.requested_notional_eur,
+                converted_notional_usd=preview.converted_notional_usd,
+                fx_rate_eur_usd=preview.fx_rate_eur_usd,
+                fx_rate_provider=preview.fx_rate_provider,
+                fx_rate_as_of=preview.fx_rate_as_of,
+                fx_buffer_pct=preview.fx_buffer_pct,
+            )
+        if self.settings.broker_mode == "live":
+            live_positions = self.list_positions()
+            if len(live_positions) >= self.settings.max_open_positions:
+                return BrokerOrderResult(
+                    provider="alpaca",
+                    mode=self.settings.broker_mode,
+                    submitted=False,
+                    dry_run=dry_run,
+                    endpoint=preview.endpoint,
+                    payload=preview.payload,
+                    client_order_id=client_order_id,
+                    broker_order_id=None,
+                    broker_status=None,
+                    message=(
+                        f"Live mode rejected the order because {len(live_positions)} open broker position(s) already "
+                        f"reach MAX_OPEN_POSITIONS={self.settings.max_open_positions}."
+                    ),
+                    requested_notional_eur=preview.requested_notional_eur,
+                    converted_notional_usd=preview.converted_notional_usd,
+                    fx_rate_eur_usd=preview.fx_rate_eur_usd,
+                    fx_rate_provider=preview.fx_rate_provider,
+                    fx_rate_as_of=preview.fx_rate_as_of,
+                    fx_buffer_pct=preview.fx_buffer_pct,
+                )
+            todays_orders = 0
+            today = datetime.utcnow().date().isoformat()
+            for order in self.list_orders(status="all", limit=100):
+                created_at = order.created_at or ""
+                if created_at.startswith(today):
+                    todays_orders += 1
+            if todays_orders >= self.settings.live_max_trades_per_day:
+                return BrokerOrderResult(
+                    provider="alpaca",
+                    mode=self.settings.broker_mode,
+                    submitted=False,
+                    dry_run=dry_run,
+                    endpoint=preview.endpoint,
+                    payload=preview.payload,
+                    client_order_id=client_order_id,
+                    broker_order_id=None,
+                    broker_status=None,
+                    message=(
+                        f"Live mode rejected the order because {todays_orders} broker order(s) already hit "
+                        f"LIVE_MAX_TRADES_PER_DAY={self.settings.live_max_trades_per_day}."
+                    ),
+                    requested_notional_eur=preview.requested_notional_eur,
+                    converted_notional_usd=preview.converted_notional_usd,
+                    fx_rate_eur_usd=preview.fx_rate_eur_usd,
+                    fx_rate_provider=preview.fx_rate_provider,
+                    fx_rate_as_of=preview.fx_rate_as_of,
+                    fx_buffer_pct=preview.fx_buffer_pct,
+                )
         if dry_run:
             return BrokerOrderResult(
                 provider="alpaca",

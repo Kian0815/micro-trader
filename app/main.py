@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 from pathlib import Path
 from urllib.parse import urlencode
@@ -41,6 +41,7 @@ from app.models import (
     SignalAction,
     SignalOutcomeSnapshot,
     SimulationAlert,
+    StateEvent,
     StrategySimulation,
     Trade,
     TradeSide,
@@ -48,6 +49,7 @@ from app.models import (
 from app.schemas import (
     ActiveDemoPositionOut,
     ApprovalFocusReportOut,
+    ExecutionAuditOut,
     LaunchReadinessReportOut,
     LiveDeploymentReadinessOut,
     GoLiveRunbookOut,
@@ -343,6 +345,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             "launch_readiness": launch_readiness,
             "live_deployment": live_deployment,
             "operator_alert_policy": operator_alert_policy,
+            "execution_audit": _execution_audit_report(db),
             "go_live_runbook": go_live_runbook,
             "setup_scorecards": setup_scorecards,
             "setup_walkforward": setup_walkforward,
@@ -447,6 +450,7 @@ def live_monitor(request: Request, db: Session = Depends(get_db)):
             "launch_readiness": launch_readiness,
             "live_deployment": live_deployment,
             "operator_alert_policy": operator_alert_policy,
+            "execution_audit": _execution_audit_report(db),
             "go_live_runbook": go_live_runbook,
             "setup_scorecards": setup_scorecards,
             "setup_walkforward": setup_walkforward,
@@ -718,6 +722,33 @@ def get_operator_alerts():
     return OperatorAlertPolicyOut(**_operator_alert_policy())
 
 
+@app.get("/api/execution/audit", response_model=ExecutionAuditOut)
+def get_execution_audit(db: Session = Depends(get_db)):
+    return ExecutionAuditOut(**_execution_audit_report(db))
+
+
+@app.post("/actions/operator-alert-test")
+def send_operator_alert_test(
+    redirect_path: str = Form("/"),
+):
+    sent = build_operator_alerts().emit(
+        event_type="worker_failure",
+        severity="warn",
+        title="Operator alert test",
+        message="Manual operator alert test triggered from the Micro Trader dashboard.",
+        details={
+            "source": "dashboard",
+            "redirect_path": redirect_path,
+        },
+    )
+    if sent:
+        return _redirect_with_message(redirect_path, "Operator alert test sent.")
+    return _redirect_with_message(
+        redirect_path,
+        "Operator alert test could not be delivered. Check the configured transport and VM logs.",
+    )
+
+
 @app.get("/api/go-live-runbook", response_model=GoLiveRunbookOut)
 def get_go_live_runbook():
     return GoLiveRunbookOut(**_go_live_runbook())
@@ -986,8 +1017,10 @@ def demo_preview_action(
     return RedirectResponse(url=f"/?{urlencode(params)}", status_code=303)
 
 
-def _redirect_with_message(message: str) -> RedirectResponse:
-    return RedirectResponse(url=f"/?{urlencode({'message': message})}", status_code=303)
+def _redirect_with_message(path: str = "/", message: str = "") -> RedirectResponse:
+    target_path = path if path.startswith("/") else "/"
+    separator = "&" if "?" in target_path else "?"
+    return RedirectResponse(url=f"{target_path}{separator}{urlencode({'message': message})}", status_code=303)
 
 
 def _demo_preview_from_request(request: Request) -> dict | None:
@@ -2489,6 +2522,7 @@ def _launch_readiness_summary(
         bool(getattr(broker_status, "enabled", False))
         and settings.broker_execution_target == "broker"
         and settings.broker_mode == "live"
+        and not settings.alpaca_endpoint_is_paper
         and settings.broker_live_confirmed
         and not settings.live_emergency_stop
         and settings.live_runbook_acknowledged
@@ -2612,6 +2646,16 @@ def _live_deployment_readiness(*, launch_readiness: dict, broker_status, reconci
         f"Current target={settings.broker_execution_target}, mode={settings.broker_mode}.",
     )
     add_check(
+        "live_endpoint_real_money",
+        "Broker endpoint is real-money capable",
+        not settings.alpaca_endpoint_is_paper,
+        (
+            f"Current ALPACA_BASE_URL={settings.alpaca_base_url or '(empty)'}."
+            if settings.alpaca_endpoint_is_paper
+            else f"Current ALPACA_BASE_URL={settings.alpaca_base_url or '(default live endpoint)'}."
+        ),
+    )
+    add_check(
         "live_confirmed",
         "Explicit live confirmation",
         settings.broker_live_confirmed,
@@ -2634,6 +2678,16 @@ def _live_deployment_readiness(*, launch_readiness: dict, broker_status, reconci
         "Alerts configured",
         settings.live_alerts_configured,
         "Phone/email alerts for fills, failures, and worker downtime should be configured before first live euro.",
+    )
+    add_check(
+        "live_allowlist",
+        "Live symbol allowlist set",
+        bool(settings.live_allowed_symbols),
+        (
+            f"Configured live symbol allowlist: {', '.join(sorted(settings.live_allowed_symbols))}."
+            if settings.live_allowed_symbols
+            else "LIVE_ALLOWED_SYMBOLS must explicitly list the first approved live symbol(s)."
+        ),
     )
     add_check(
         "reconciliation_clean",
@@ -2672,7 +2726,11 @@ def _operator_alert_policy() -> dict:
         "worker failure -> webhook event worker_failure",
         "trade fill -> webhook event trade_fill",
         "trade rejection -> webhook event trade_rejection",
+        "heartbeat lag / recovery -> telegram event heartbeat_lag or heartbeat_recovered",
+        "stale quote protection -> telegram event stale_quotes",
+        "reconciliation drift -> telegram event reconciliation_drift",
     ]
+    interactive_commands = ["/status", "/testalert", "/help"] if status.transport == "telegram" else []
     return {
         "generated_at": datetime.utcnow(),
         "configured": status.configured,
@@ -2681,7 +2739,184 @@ def _operator_alert_policy() -> dict:
         "supported_transports": status.supported_transports,
         "events": status.events,
         "coverage": coverage,
+        "interactive_commands": interactive_commands,
         "message": status.message,
+    }
+
+
+def _heartbeat_summary(latest_engine_run: EngineRun | None) -> tuple[str, str]:
+    if not latest_engine_run:
+        return "warn", "No completed engine cycle has been recorded yet."
+    gap_seconds = max(int((datetime.utcnow() - latest_engine_run.completed_at).total_seconds()), 0)
+    threshold_seconds = max(settings.heartbeat_max_gap_seconds, settings.worker_interval_seconds * 2)
+    if gap_seconds > threshold_seconds:
+        return (
+            "warn",
+            f"Last completed engine cycle is {round(gap_seconds / 60)} min old, above the {round(threshold_seconds / 60)} min heartbeat threshold.",
+        )
+    return (
+        "ok",
+        f"Last completed engine cycle arrived {round(gap_seconds / 60)} min ago, inside the heartbeat threshold.",
+    )
+
+
+def _quote_safety_summary(provider_health: dict) -> tuple[str, str]:
+    warnings: list[str] = []
+    for kind, sample in provider_health.get("latest_by_kind", {}).items():
+        if sample.stale_assets >= settings.stale_quote_alert_threshold:
+            warnings.append(f"{kind} has {sample.stale_assets} stale quote(s)")
+        if sample.failed_assets > 0:
+            warnings.append(f"{kind} has {sample.failed_assets} failed quote(s)")
+        if sample.status != "ok" and not sample.cache_used:
+            warnings.append(f"{kind} provider reports {sample.status}")
+    if warnings:
+        return "warn", "; ".join(warnings)
+    return "ok", "Fresh quote coverage is inside the configured stale-data threshold."
+
+
+def _live_guard_summary() -> tuple[str, str]:
+    reasons = [
+        f"max live notional EUR {settings.live_max_notional_eur:.2f}",
+        f"max live trades/day {settings.live_max_trades_per_day}",
+        f"max live positions {settings.max_open_positions}",
+    ]
+    if settings.live_allowed_symbols:
+        reasons.append(f"symbol allowlist: {', '.join(sorted(settings.live_allowed_symbols))}")
+    if settings.live_emergency_stop:
+        return "guarded", "Live execution remains fail-closed with " + ", ".join(reasons) + "."
+    return "released", "Live emergency stop is off. Active live guardrails: " + ", ".join(reasons) + "."
+
+
+def _execution_audit_report(db: Session) -> dict:
+    latest_engine_run = db.scalar(select(EngineRun).order_by(EngineRun.completed_at.desc()).limit(1))
+    reconciliation = build_reconciliation_service().snapshot(db)
+    provider_health = _provider_health_summary(db)
+    heartbeat_state, heartbeat_message = _heartbeat_summary(latest_engine_run)
+    quote_safety_state, quote_safety_message = _quote_safety_summary(provider_health)
+    live_guard_state, live_guard_message = _live_guard_summary()
+    cutoff = datetime.utcnow() - timedelta(hours=24)
+
+    fills_24h = int(
+        db.scalar(
+            select(func.count(ExecutionIntent.id)).where(
+                ExecutionIntent.status == ExecutionIntentStatus.FILLED,
+                ExecutionIntent.updated_at >= cutoff,
+            )
+        )
+        or 0
+    )
+    skips_24h = int(
+        db.scalar(
+            select(func.count(ExecutionIntent.id)).where(
+                ExecutionIntent.status == ExecutionIntentStatus.SKIPPED,
+                ExecutionIntent.updated_at >= cutoff,
+            )
+        )
+        or 0
+    )
+    failed_24h = int(
+        db.scalar(
+            select(func.count(ExecutionIntent.id)).where(
+                ExecutionIntent.status == ExecutionIntentStatus.FAILED,
+                ExecutionIntent.updated_at >= cutoff,
+            )
+        )
+        or 0
+    )
+    state_changes_24h = int(
+        db.scalar(select(func.count(StateEvent.id)).where(StateEvent.created_at >= cutoff))
+        or 0
+    )
+
+    recent_intents = db.scalars(
+        select(ExecutionIntent)
+        .options(joinedload(ExecutionIntent.asset))
+        .order_by(ExecutionIntent.updated_at.desc())
+        .limit(10)
+    ).all()
+    recent_trades = db.scalars(
+        select(Trade)
+        .options(joinedload(Trade.asset))
+        .order_by(Trade.executed_at.desc())
+        .limit(10)
+    ).all()
+    recent_events = db.scalars(
+        select(StateEvent)
+        .order_by(StateEvent.created_at.desc())
+        .limit(10)
+    ).all()
+    recent_runs = db.scalars(
+        select(EngineRun).order_by(EngineRun.completed_at.desc()).limit(6)
+    ).all()
+
+    timeline: list[dict] = []
+    for intent in recent_intents:
+        symbol = intent.asset.symbol if intent.asset else None
+        timeline.append(
+            {
+                "occurred_at": intent.updated_at,
+                "source_type": "intent",
+                "status": intent.status.value,
+                "title": f"{symbol or 'asset'} intent {intent.status.value}",
+                "detail": intent.error_message or f"{intent.side.value} via {intent.execution_target}/{intent.mode}",
+                "symbol": symbol,
+            }
+        )
+    for trade in recent_trades:
+        symbol = trade.asset.symbol if trade.asset else None
+        timeline.append(
+            {
+                "occurred_at": trade.executed_at,
+                "source_type": "trade",
+                "status": trade.status.value,
+                "title": f"{symbol or 'asset'} {trade.side.value} {trade.status.value}",
+                "detail": trade.reason,
+                "symbol": symbol,
+            }
+        )
+    for event in recent_events:
+        timeline.append(
+            {
+                "occurred_at": event.created_at,
+                "source_type": "state_event",
+                "status": event.severity,
+                "title": event.title,
+                "detail": event.message,
+                "symbol": None,
+            }
+        )
+    for run in recent_runs:
+        timeline.append(
+            {
+                "occurred_at": run.completed_at,
+                "source_type": "engine",
+                "status": run.status,
+                "title": f"Engine cycle {run.status}",
+                "detail": run.message,
+                "symbol": None,
+            }
+        )
+    timeline.sort(key=lambda item: item["occurred_at"], reverse=True)
+
+    return {
+        "generated_at": datetime.utcnow(),
+        "heartbeat_state": heartbeat_state,
+        "heartbeat_message": heartbeat_message,
+        "quote_safety_state": quote_safety_state,
+        "quote_safety_message": quote_safety_message,
+        "reconciliation_state": reconciliation.status,
+        "reconciliation_message": reconciliation.message,
+        "live_guard_state": live_guard_state,
+        "live_guard_message": live_guard_message,
+        "last_engine_completed_at": latest_engine_run.completed_at if latest_engine_run else None,
+        "last_engine_status": latest_engine_run.status if latest_engine_run else "unknown",
+        "pending_intents": reconciliation.pending_intents,
+        "failed_intents": reconciliation.failed_intents,
+        "fills_24h": fills_24h,
+        "skips_24h": skips_24h,
+        "failed_24h": failed_24h,
+        "state_changes_24h": state_changes_24h,
+        "timeline": timeline[:18],
     }
 
 
@@ -2701,10 +2936,14 @@ def _go_live_runbook() -> dict:
             {"name": "BROKER_EXECUTION_TARGET", "current": settings.broker_execution_target, "target": "broker"},
             {"name": "BROKER_MODE", "current": settings.broker_mode, "target": "live"},
             {"name": "BROKER_LIVE_CONFIRMED", "current": str(settings.broker_live_confirmed).lower(), "target": "true"},
+            {"name": "ALPACA_BASE_URL", "current": settings.alpaca_base_url or "(default)", "target": "https://api.alpaca.markets"},
             {"name": "LIVE_RUNBOOK_ACKNOWLEDGED", "current": str(settings.live_runbook_acknowledged).lower(), "target": "true"},
             {"name": "LIVE_ALERTS_CONFIGURED", "current": str(settings.live_alerts_configured).lower(), "target": "true"},
             {"name": "OPERATOR_ALERT_TRANSPORT", "current": settings.operator_alert_transport, "target": "telegram or another configured transport"},
             {"name": "LIVE_EMERGENCY_STOP", "current": str(settings.live_emergency_stop).lower(), "target": "false only at final release moment"},
+            {"name": "LIVE_MAX_NOTIONAL_EUR", "current": str(settings.live_max_notional_eur), "target": f"{first_capital_eur:.2f}"},
+            {"name": "LIVE_MAX_TRADES_PER_DAY", "current": str(settings.live_max_trades_per_day), "target": "1"},
+            {"name": "LIVE_ALLOWED_SYMBOLS", "current": ",".join(sorted(settings.live_allowed_symbols)) or "(empty)", "target": "approved live symbol allowlist"},
             {"name": "MAX_OPEN_POSITIONS", "current": str(settings.max_open_positions), "target": "1"},
             {"name": "MAX_NOTIONAL_PER_TRADE_EUR", "current": str(settings.max_notional_per_trade_eur), "target": f"{first_capital_eur:.2f}"},
         ],
@@ -2769,6 +3008,9 @@ def _execution_guardrails(latest_engine_run: EngineRun | None, autopilot_status:
         "max_gross_exposure_pct": round(settings.max_gross_exposure_pct * 100, 2),
         "max_symbol_exposure_pct": round(settings.max_symbol_exposure_pct * 100, 2),
         "max_portfolio_drawdown_pct": round(settings.max_portfolio_drawdown_pct, 2),
+        "live_max_notional_eur": round(settings.live_max_notional_eur, 2),
+        "live_max_trades_per_day": settings.live_max_trades_per_day,
+        "live_allowed_symbols": sorted(settings.live_allowed_symbols),
         "liquidate_on_drawdown_breach": settings.liquidate_on_drawdown_breach,
         "asset_kind_exposure_limits": risk_snapshot["asset_kind_exposure_limits"],
         "risk_snapshot": risk_snapshot,

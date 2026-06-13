@@ -12,6 +12,7 @@ from app.services.evaluation import StrategyProofService
 from app.services.events import StateEventService
 from app.services.execution import ExecutionIntentService
 from app.services.opportunity import BestOpportunitySelector
+from app.services.operator_alerts import build_operator_alert_service
 from app.services.reconciliation import ReconciliationService
 from app.services.risk import RiskEngine
 from app.services.simulation import BestAssetSimulationService
@@ -21,6 +22,7 @@ from app.services.trading import PaperTrader
 
 def run_engine_cycle(db: Session, settings: Settings) -> dict[str, int]:
     started_at = datetime.utcnow()
+    latest_previous_engine_run = db.scalar(select(EngineRun).order_by(EngineRun.completed_at.desc()).limit(1))
     assets = db.scalars(select(Asset).where(Asset.is_active.is_(True))).all()
 
     market_service = MarketDataRouter(
@@ -90,6 +92,7 @@ def run_engine_cycle(db: Session, settings: Settings) -> dict[str, int]:
         allowed_asset_kinds=settings.simulation_asset_kinds,
         allowed_setup_statuses=settings.unattended_setup_statuses,
     )
+    operator_alerts = build_operator_alert_service(settings)
 
     latest_ticks = market_service.persist(db, assets)
     news_count = news_service.ingest(db, assets)
@@ -116,7 +119,27 @@ def run_engine_cycle(db: Session, settings: Settings) -> dict[str, int]:
         walkforward_report=walkforward_report,
         active_simulation=simulation_service.get_active(db),
     )
-    reconciliation_service.record_snapshot(db)
+    reconciliation_snapshot = reconciliation_service.record_snapshot(db)
+    _record_heartbeat_alerts(
+        db,
+        settings=settings,
+        event_service=event_service,
+        operator_alerts=operator_alerts,
+        latest_previous_engine_run=latest_previous_engine_run,
+    )
+    _record_quote_safety_alerts(
+        db,
+        settings=settings,
+        event_service=event_service,
+        operator_alerts=operator_alerts,
+        provider_report=market_service.last_provider_report,
+    )
+    _record_reconciliation_alerts(
+        db,
+        event_service=event_service,
+        operator_alerts=operator_alerts,
+        reconciliation_snapshot=reconciliation_snapshot,
+    )
 
     result = {"assets": len(assets), "news_items": news_count, "signals": len(signals)}
     safety_message = ""
@@ -138,6 +161,154 @@ def run_engine_cycle(db: Session, settings: Settings) -> dict[str, int]:
     )
     db.commit()
     return result
+
+
+def _record_heartbeat_alerts(
+    db: Session,
+    *,
+    settings: Settings,
+    event_service: StateEventService,
+    operator_alerts,
+    latest_previous_engine_run: EngineRun | None,
+) -> None:
+    threshold_seconds = max(settings.heartbeat_max_gap_seconds, settings.worker_interval_seconds * 2)
+    latest_heartbeat_event = event_service.latest_for_key(db, "worker-heartbeat")
+    if not latest_previous_engine_run:
+        return
+    gap_seconds = max(int((datetime.utcnow() - latest_previous_engine_run.completed_at).total_seconds()), 0)
+    if gap_seconds > threshold_seconds:
+        lag_event = event_service.record_change(
+            db,
+            event_key="worker-heartbeat",
+            category="ops",
+            severity="warn",
+            title="Worker heartbeat lagged",
+            message=(
+                f"No completed engine cycle landed for about {round(gap_seconds / 60)} min, above the "
+                f"{round(threshold_seconds / 60)} min threshold."
+            ),
+            fingerprint=f"lag|{latest_previous_engine_run.id}",
+        )
+        if lag_event:
+            operator_alerts.emit(
+                event_type="heartbeat_lag",
+                severity="warn",
+                title=lag_event.title,
+                message=lag_event.message,
+                details={"last_engine_run_id": latest_previous_engine_run.id, "gap_seconds": gap_seconds},
+            )
+    else:
+        recovered = bool(latest_heartbeat_event and latest_heartbeat_event.fingerprint != "ok")
+        healthy_event = event_service.record_change(
+            db,
+            event_key="worker-heartbeat",
+            category="ops",
+            severity="ok",
+            title="Worker heartbeat recovered" if recovered else "Worker heartbeat healthy",
+            message=(
+                "A fresh engine cycle completed and the heartbeat is back inside the configured threshold."
+                if recovered
+                else "Fresh engine cycles are arriving inside the configured heartbeat threshold."
+            ),
+            fingerprint="ok",
+        )
+        if healthy_event and recovered:
+            operator_alerts.emit(
+                event_type="heartbeat_recovered",
+                severity="ok",
+                title=healthy_event.title,
+                message=healthy_event.message,
+                details={"threshold_seconds": threshold_seconds},
+            )
+
+
+def _record_quote_safety_alerts(
+    db: Session,
+    *,
+    settings: Settings,
+    event_service: StateEventService,
+    operator_alerts,
+    provider_report: dict[str, dict],
+) -> None:
+    for kind, report in provider_report.items():
+        stale_assets = int(report.get("stale_assets") or 0)
+        failed_assets = int(report.get("failed_assets") or 0)
+        provider_status = str(report.get("status") or "ok")
+        if stale_assets >= settings.stale_quote_alert_threshold or failed_assets > 0 or provider_status != "ok":
+            warn_event = event_service.record_change(
+                db,
+                event_key=f"quote-safety-{kind}",
+                category="data",
+                severity="warn",
+                title=f"{kind.upper()} quote safety degraded",
+                message=(
+                    f"{kind.upper()} provider path reports status {provider_status}, "
+                    f"{stale_assets} stale quote(s), and {failed_assets} failed quote(s)."
+                ),
+                fingerprint=f"warn|{provider_status}|{stale_assets}|{failed_assets}",
+            )
+            if warn_event:
+                operator_alerts.emit(
+                    event_type="stale_quotes",
+                    severity="warn",
+                    title=warn_event.title,
+                    message=warn_event.message,
+                    details={"asset_kind": kind, "provider_status": provider_status},
+                )
+        else:
+            event_service.record_change(
+                db,
+                event_key=f"quote-safety-{kind}",
+                category="data",
+                severity="ok",
+                title=f"{kind.upper()} quote safety healthy",
+                message=f"{kind.upper()} quote freshness and provider health are inside the configured threshold.",
+                fingerprint="ok",
+            )
+
+
+def _record_reconciliation_alerts(
+    db: Session,
+    *,
+    event_service: StateEventService,
+    operator_alerts,
+    reconciliation_snapshot,
+) -> None:
+    if reconciliation_snapshot.status != "ok":
+        drift_event = event_service.record_change(
+            db,
+            event_key="execution-reconciliation",
+            category="execution",
+            severity="warn",
+            title="Execution reconciliation needs attention",
+            message=reconciliation_snapshot.message,
+            fingerprint=(
+                f"{reconciliation_snapshot.status}|{reconciliation_snapshot.pending_intents}|"
+                f"{reconciliation_snapshot.failed_intents}|{reconciliation_snapshot.execution_target}"
+            ),
+        )
+        if drift_event:
+            operator_alerts.emit(
+                event_type="reconciliation_drift",
+                severity="warn",
+                title=drift_event.title,
+                message=drift_event.message,
+                details={
+                    "status": reconciliation_snapshot.status,
+                    "pending_intents": reconciliation_snapshot.pending_intents,
+                    "failed_intents": reconciliation_snapshot.failed_intents,
+                },
+            )
+    else:
+        event_service.record_change(
+            db,
+            event_key="execution-reconciliation",
+            category="execution",
+            severity="ok",
+            title="Execution reconciliation clean",
+            message=reconciliation_snapshot.message,
+            fingerprint="ok",
+        )
 
 
 def _record_state_events(
@@ -572,6 +743,7 @@ def _record_provider_health(
             age_seconds = max(int((datetime.utcnow() - tick.captured_at).total_seconds()), 0)
             if age_seconds > max_tick_age_seconds:
                 stale_assets += 1
+        report["stale_assets"] = stale_assets
         db.add(
             ProviderHealthSample(
                 provider=report["provider"],

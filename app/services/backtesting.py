@@ -27,6 +27,7 @@ class WalkForwardSlice:
 @dataclass
 class ReplayOutcomeObservation:
     asset_kind: str
+    asset_symbol: str
     setup_type: str
     action: str
     horizon_hours: int
@@ -112,18 +113,20 @@ class WalkForwardAnalysisService:
                 SignalOutcomeSnapshot.pnl_pct.is_not(None),
                 SignalOutcomeSnapshot.horizon_hours.in_((4, 24)),
             )
-            .order_by(SignalOutcomeSnapshot.updated_at.asc())
+            .order_by(SignalOutcomeSnapshot.updated_at.desc())
             .limit(5000)
         ).all()
+        live_observations = self._compress_live_observations(
+            observation
+            for row in live_rows
+            if (observation := self._observation_from_live_row(row)) is not None
+        )
 
         grouped: dict[tuple[str, str], list[ReplayOutcomeObservation]] = {}
         earliest_signal_at: datetime | None = None
         latest_signal_at: datetime | None = None
 
-        for row in live_rows:
-            observation = self._observation_from_live_row(row)
-            if not observation:
-                continue
+        for observation in live_observations:
             if earliest_signal_at is None or observation.signal_at < earliest_signal_at:
                 earliest_signal_at = observation.signal_at
             if latest_signal_at is None or observation.signal_at > latest_signal_at:
@@ -163,6 +166,35 @@ class WalkForwardAnalysisService:
             rows=report_rows,
         )
 
+    def _compress_live_observations(
+        self,
+        observations: list[ReplayOutcomeObservation] | tuple[ReplayOutcomeObservation, ...] | object,
+    ) -> list[ReplayOutcomeObservation]:
+        ordered = sorted(observations, key=lambda row: (row.signal_at, row.outcome_at))
+        if not ordered:
+            return []
+
+        compressed: list[ReplayOutcomeObservation] = []
+        last_seen_at: dict[tuple[str, str, str, int], datetime] = {}
+        for observation in ordered:
+            interval_minutes = self.replay_interval_minutes.get(observation.asset_kind)
+            if not interval_minutes or observation.asset_kind not in self.replay_kinds:
+                compressed.append(observation)
+                continue
+
+            fingerprint = (
+                observation.asset_kind,
+                observation.setup_type,
+                observation.action,
+                observation.horizon_hours,
+            )
+            last_signal_at = last_seen_at.get(fingerprint)
+            if last_signal_at and observation.signal_at - last_signal_at < timedelta(minutes=interval_minutes):
+                continue
+            compressed.append(observation)
+            last_seen_at[fingerprint] = observation.signal_at
+        return compressed
+
     def _observation_from_live_row(self, row: SignalOutcomeSnapshot) -> ReplayOutcomeObservation | None:
         signal = row.signal
         asset = signal.asset if signal else None
@@ -179,6 +211,7 @@ class WalkForwardAnalysisService:
             return None
         return ReplayOutcomeObservation(
             asset_kind=asset.kind.value,
+            asset_symbol=asset.symbol,
             setup_type=setup_type,
             action=signal.action.value,
             horizon_hours=row.horizon_hours,
@@ -266,6 +299,7 @@ class WalkForwardAnalysisService:
                         observations.append(
                             ReplayOutcomeObservation(
                                 asset_kind=asset.kind.value,
+                                asset_symbol=asset.symbol,
                                 setup_type=evaluation.setup_type,
                                 action=action,
                                 horizon_hours=horizon_hours,

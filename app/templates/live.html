@@ -9,6 +9,9 @@
   </head>
   <body>
     <main class="layout">
+      {% if request.query_params.get("message") %}
+      <section class="banner">{{ request.query_params.get("message") }}</section>
+      {% endif %}
       <section class="hero">
         <div>
           <p class="eyebrow">Live monitor</p>
@@ -630,6 +633,10 @@
               <span class="status-badge status-{{ 'ready' if operator_alert_policy.webhook_enabled else 'disabled' }}">{{ operator_alert_policy.transport }}</span>
             </div>
             <p>{{ operator_alert_policy.message }}</p>
+            <form class="stack-form" action="/actions/operator-alert-test" method="post">
+              <input type="hidden" name="redirect_path" value="/live" />
+              <button type="submit">Send test alert</button>
+            </form>
             <div class="threshold-list">
               {% for event_name in operator_alert_policy.events %}
               <span class="threshold-chip {% if operator_alert_policy.configured %}threshold-good{% else %}threshold-bad{% endif %}">{{ event_name }}</span>
@@ -637,12 +644,57 @@
               {% for transport_name in operator_alert_policy.supported_transports %}
               <span class="threshold-chip threshold-good">{{ transport_name }}</span>
               {% endfor %}
+              {% for item in operator_alert_policy.interactive_commands %}
+              <span class="threshold-chip threshold-good">{{ item }}</span>
+              {% endfor %}
             </div>
+            {% if operator_alert_policy.interactive_commands %}
+            <p class="mini-note">Telegram command path is enabled. Send /status, /testalert, or /help to the bot.</p>
+            {% endif %}
           </article>
           {% for item in operator_alert_policy.coverage %}
           <article class="story-card">
             <div class="story-head"><strong>{{ item }}</strong></div>
             <p>Operator webhook coverage for this event path.</p>
+          </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Execution Audit Board</h2>
+          <a href="/api/execution/audit">JSON</a>
+        </div>
+        <div class="story-stream">
+          <article class="story-card">
+            <div class="story-head">
+              <strong>Runtime trust</strong>
+              <span class="status-badge status-{{ execution_audit.heartbeat_state }}">{{ execution_audit.heartbeat_state }}</span>
+            </div>
+            <p>{{ execution_audit.heartbeat_message }}</p>
+            <div class="threshold-list">
+              <span class="threshold-chip threshold-{{ 'good' if execution_audit.quote_safety_state == 'ok' else 'bad' }}">{{ execution_audit.quote_safety_state }}</span>
+              <span class="threshold-chip threshold-{{ 'good' if execution_audit.reconciliation_state == 'ok' else 'bad' }}">{{ execution_audit.reconciliation_state }}</span>
+              <span class="threshold-chip threshold-{{ 'good' if execution_audit.live_guard_state == 'guarded' else 'bad' }}">{{ execution_audit.live_guard_state }}</span>
+            </div>
+            <p class="mini-note">{{ execution_audit.quote_safety_message }}</p>
+            <p class="mini-note">{{ execution_audit.reconciliation_message }}</p>
+          </article>
+          <article class="story-card">
+            <div class="story-head"><strong>24h execution flow</strong></div>
+            <p>{{ execution_audit.fills_24h }} fills · {{ execution_audit.skips_24h }} skips · {{ execution_audit.failed_24h }} failed · {{ execution_audit.state_changes_24h }} state changes</p>
+            <p class="mini-note">{{ execution_audit.pending_intents }} pending / {{ execution_audit.failed_intents }} failed right now.</p>
+            <p class="mini-note">{{ execution_audit.live_guard_message }}</p>
+          </article>
+          {% for item in execution_audit.timeline[:6] %}
+          <article class="story-card">
+            <div class="story-head">
+              <strong>{{ item.title }}</strong>
+              <span class="status-badge status-{{ item.status }}">{{ item.status }}</span>
+            </div>
+            <p>{{ item.detail }}</p>
+            <p class="mini-note">{{ item.occurred_at.strftime("%Y-%m-%d %H:%M:%S UTC") }} · {{ item.source_type }}{% if item.symbol %} · {{ item.symbol }}{% endif %}</p>
           </article>
           {% endfor %}
         </div>

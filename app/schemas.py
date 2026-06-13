@@ -317,7 +317,38 @@ class OperatorAlertPolicyOut(BaseModel):
     supported_transports: list[str]
     events: list[str]
     coverage: list[str]
+    interactive_commands: list[str]
     message: str
+
+
+class ExecutionAuditTimelineItemOut(BaseModel):
+    occurred_at: datetime
+    source_type: str
+    status: str
+    title: str
+    detail: str
+    symbol: str | None = None
+
+
+class ExecutionAuditOut(BaseModel):
+    generated_at: datetime
+    heartbeat_state: str
+    heartbeat_message: str
+    quote_safety_state: str
+    quote_safety_message: str
+    reconciliation_state: str
+    reconciliation_message: str
+    live_guard_state: str
+    live_guard_message: str
+    last_engine_completed_at: datetime | None
+    last_engine_status: str
+    pending_intents: int
+    failed_intents: int
+    fills_24h: int
+    skips_24h: int
+    failed_24h: int
+    state_changes_24h: int
+    timeline: list[ExecutionAuditTimelineItemOut]
 
 
 class GoLiveRunbookOut(BaseModel):

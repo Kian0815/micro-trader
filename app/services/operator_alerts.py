@@ -75,6 +75,55 @@ class OperatorAlertService:
         except Exception:
             return False
 
+    def send_message(self, text: str, *, chat_id: str | None = None) -> bool:
+        if not self.settings.operator_alert_telegram_bot_token:
+            return False
+        target_chat_id = chat_id or self.settings.operator_alert_telegram_chat_id
+        if not target_chat_id:
+            return False
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                response = client.post(
+                    f"https://api.telegram.org/bot{self.settings.operator_alert_telegram_bot_token}/sendMessage",
+                    json={
+                        "chat_id": target_chat_id,
+                        "text": text,
+                    },
+                )
+                response.raise_for_status()
+            return True
+        except Exception:
+            return False
+
+    def fetch_telegram_updates(
+        self,
+        *,
+        offset: int | None = None,
+        limit: int = 20,
+        timeout_seconds: int = 0,
+    ) -> list[dict]:
+        if not self.settings.operator_alert_telegram_bot_token:
+            return []
+        params: dict[str, int] = {
+            "limit": max(1, min(limit, 100)),
+            "timeout": max(0, timeout_seconds),
+        }
+        if offset is not None:
+            params["offset"] = offset
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                response = client.get(
+                    f"https://api.telegram.org/bot{self.settings.operator_alert_telegram_bot_token}/getUpdates",
+                    params=params,
+                )
+                response.raise_for_status()
+                payload = response.json()
+            if payload.get("ok"):
+                return payload.get("result", [])
+        except Exception:
+            return []
+        return []
+
     def _transport_ready(self, transport: str) -> bool:
         if transport == "telegram":
             return bool(self.settings.operator_alert_telegram_bot_token and self.settings.operator_alert_telegram_chat_id)
@@ -134,24 +183,12 @@ class OperatorAlertService:
         return True
 
     def _send_telegram(self, payload: dict) -> bool:
-        url = (
-            f"https://api.telegram.org/bot{self.settings.operator_alert_telegram_bot_token}/sendMessage"
-        )
         text = (
             f"[{payload['severity'].upper()}] {payload['title']}\n"
             f"{payload['message']}\n"
             f"event={payload['event_type']}"
         )
-        with httpx.Client(timeout=10.0) as client:
-            response = client.post(
-                url,
-                json={
-                    "chat_id": self.settings.operator_alert_telegram_chat_id,
-                    "text": text,
-                },
-            )
-            response.raise_for_status()
-        return True
+        return self.send_message(text)
 
 
 def build_operator_alert_service(settings: Settings) -> OperatorAlertService:

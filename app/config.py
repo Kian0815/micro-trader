@@ -26,16 +26,23 @@ class Settings(BaseSettings):
     live_emergency_stop: bool = True
     live_runbook_acknowledged: bool = False
     live_alerts_configured: bool = False
+    heartbeat_max_gap_seconds: int = 900
+    stale_quote_alert_threshold: int = 1
+    live_max_notional_eur: float = 25.0
+    live_max_trades_per_day: int = 1
+    live_allowed_symbols_raw: str = Field(default="", alias="LIVE_ALLOWED_SYMBOLS")
     operator_alert_transport: str = "none"
     operator_alert_webhook_url: str = ""
     operator_alert_telegram_bot_token: str = ""
     operator_alert_telegram_chat_id: str = ""
+    operator_alert_telegram_poll_enabled: bool = True
+    operator_alert_telegram_offset_path: str = "/app/state/runtime/telegram-update-offset.txt"
     operator_alert_slack_webhook_url: str = ""
     operator_alert_discord_webhook_url: str = ""
     operator_alert_whatsapp_bridge_url: str = ""
     operator_alert_signal_bridge_url: str = ""
     operator_alert_events_raw: str = Field(
-        default="worker_failure,trade_fill,trade_rejection",
+        default="worker_failure,trade_fill,trade_rejection,heartbeat_lag,heartbeat_recovered,stale_quotes,reconciliation_drift",
         alias="OPERATOR_ALERT_EVENTS",
     )
     alpaca_api_key: str = ""
@@ -147,10 +154,34 @@ class Settings(BaseSettings):
 
     @property
     def operator_alert_events(self) -> set[str]:
-        allowed = {"worker_failure", "trade_fill", "trade_rejection"}
+        allowed = {
+            "worker_failure",
+            "trade_fill",
+            "trade_rejection",
+            "heartbeat_lag",
+            "heartbeat_recovered",
+            "stale_quotes",
+            "reconciliation_drift",
+        }
         parsed = {item.strip().lower() for item in self.operator_alert_events_raw.split(",") if item.strip()}
         filtered = parsed & allowed
-        return filtered or {"worker_failure", "trade_fill", "trade_rejection"}
+        return filtered or {
+            "worker_failure",
+            "trade_fill",
+            "trade_rejection",
+            "heartbeat_lag",
+            "heartbeat_recovered",
+            "stale_quotes",
+            "reconciliation_drift",
+        }
+
+    @property
+    def live_allowed_symbols(self) -> set[str]:
+        return {item.strip().upper() for item in self.live_allowed_symbols_raw.split(",") if item.strip()}
+
+    @property
+    def alpaca_endpoint_is_paper(self) -> bool:
+        return "paper-api.alpaca.markets" in (self.alpaca_base_url or "").lower()
 
     @property
     def supported_operator_alert_transports(self) -> list[str]:

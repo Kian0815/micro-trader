@@ -191,15 +191,22 @@ BROKER_LIVE_CONFIRMED=false
 LIVE_EMERGENCY_STOP=true
 LIVE_RUNBOOK_ACKNOWLEDGED=false
 LIVE_ALERTS_CONFIGURED=false
+HEARTBEAT_MAX_GAP_SECONDS=900
+STALE_QUOTE_ALERT_THRESHOLD=1
+LIVE_MAX_NOTIONAL_EUR=25
+LIVE_MAX_TRADES_PER_DAY=1
+LIVE_ALLOWED_SYMBOLS=
 OPERATOR_ALERT_TRANSPORT=none
 OPERATOR_ALERT_WEBHOOK_URL=
 OPERATOR_ALERT_TELEGRAM_BOT_TOKEN=
 OPERATOR_ALERT_TELEGRAM_CHAT_ID=
+OPERATOR_ALERT_TELEGRAM_POLL_ENABLED=true
+OPERATOR_ALERT_TELEGRAM_OFFSET_PATH=/app/state/runtime/telegram-update-offset.txt
 OPERATOR_ALERT_SLACK_WEBHOOK_URL=
 OPERATOR_ALERT_DISCORD_WEBHOOK_URL=
 OPERATOR_ALERT_WHATSAPP_BRIDGE_URL=
 OPERATOR_ALERT_SIGNAL_BRIDGE_URL=
-OPERATOR_ALERT_EVENTS=worker_failure,trade_fill,trade_rejection
+OPERATOR_ALERT_EVENTS=worker_failure,trade_fill,trade_rejection,heartbeat_lag,heartbeat_recovered,stale_quotes,reconciliation_drift
 ALPACA_API_KEY=
 ALPACA_API_SECRET=
 ALPACA_BASE_URL=
@@ -229,11 +236,19 @@ Notes:
 - `BROKER_LIVE_CONFIRMED=false` blocks live broker submission until you explicitly remove that guard.
 - `LIVE_EMERGENCY_STOP=true` is a second hard block that prevents live submission even if broker live mode is turned on.
 - `LIVE_RUNBOOK_ACKNOWLEDGED=false` and `LIVE_ALERTS_CONFIGURED=false` keep the live deployment checklist red until the operating process is intentionally prepared.
+- `HEARTBEAT_MAX_GAP_SECONDS` sets how old the last completed engine cycle can get before operator heartbeat alerts fire.
+- `STALE_QUOTE_ALERT_THRESHOLD` decides how many stale quotes in a lane are enough to escalate into an operator alert.
+- `LIVE_MAX_NOTIONAL_EUR`, `LIVE_MAX_TRADES_PER_DAY`, and `LIVE_ALLOWED_SYMBOLS` make the live broker path fail closed even after live mode is enabled.
+- `ALPACA_BASE_URL` must point to Alpaca's real-money endpoint before the live deployment checklist can go fully green. The app now blocks `BROKER_MODE=live` if it still points at `paper-api.alpaca.markets`.
 - `OPERATOR_ALERT_TRANSPORT` supports `telegram`, `webhook`, `slack`, `discord`, `whatsapp_bridge`, and `signal_bridge`.
 - Telegram is the simplest direct chat option and uses `OPERATOR_ALERT_TELEGRAM_BOT_TOKEN` plus `OPERATOR_ALERT_TELEGRAM_CHAT_ID`.
+- `OPERATOR_ALERT_TELEGRAM_POLL_ENABLED=true` lets the worker answer lightweight Telegram commands such as `/status` and `/testalert`.
+- `OPERATOR_ALERT_TELEGRAM_OFFSET_PATH` stores the last consumed Telegram update id so the bot does not keep reprocessing the same command after a restart.
 - `OPERATOR_ALERT_WEBHOOK_URL`, `OPERATOR_ALERT_SLACK_WEBHOOK_URL`, and `OPERATOR_ALERT_DISCORD_WEBHOOK_URL` let the VM send operator notifications to those destinations.
 - `OPERATOR_ALERT_WHATSAPP_BRIDGE_URL` and `OPERATOR_ALERT_SIGNAL_BRIDGE_URL` are intentionally bridge-style placeholders for public-repo use. They assume you run your own approved gateway or bridge service rather than pretending Micro Trader can talk to WhatsApp or Signal natively.
-- `OPERATOR_ALERT_EVENTS` controls which of `worker_failure`, `trade_fill`, and `trade_rejection` can emit webhook alerts.
+- `OPERATOR_ALERT_EVENTS` now covers `worker_failure`, `trade_fill`, `trade_rejection`, `heartbeat_lag`, `heartbeat_recovered`, `stale_quotes`, and `reconciliation_drift`.
+- When Telegram is active, the dashboard and live monitor expose a `Send test alert` action and the bot can answer `/status`, `/testalert`, and `/help`.
+- The dashboard and live monitor now also expose an `Execution Audit Board` so you can inspect runtime heartbeat, quote safety, reconciliation drift, and the recent execution timeline from one place.
 
 ### Operator alert transports
 

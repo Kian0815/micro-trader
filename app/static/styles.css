@@ -422,6 +422,9 @@ h1 {
 }
 
 .status-warn,
+.status-paused,
+.status-guarded,
+.status-pending,
 .status-hold,
 .status-skipped,
 .status-stale {
@@ -430,6 +433,7 @@ h1 {
 }
 
 .status-danger,
+.status-blocked,
 .status-failed,
 .status-missing,
 .status-sell {
@@ -443,7 +447,8 @@ h1 {
 }
 
 .status-completed,
-.status-active {
+.status-active,
+.status-released {
   background: rgba(15, 118, 110, 0.12);
   color: var(--accent);
 }
