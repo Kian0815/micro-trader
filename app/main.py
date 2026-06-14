@@ -2347,7 +2347,7 @@ def _launch_readiness_summary(
             "Focus the system on one lane and keep collecting cleaner resolved outcomes until a real candidate emerges.",
         )
 
-    if live_proof_status in {"ready", "approved"}:
+    if ready_setups > 0 and live_proof_status in {"ready", "approved", "cleared"}:
         add_gate(
             "live_evidence",
             "Live evidence",
