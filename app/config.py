@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     operator_alert_telegram_bot_token: str = ""
     operator_alert_telegram_chat_id: str = ""
     operator_alert_telegram_poll_enabled: bool = True
+    operator_alert_telegram_poll_interval_seconds: int = 15
     operator_alert_telegram_offset_path: str = "/app/state/runtime/telegram-update-offset.txt"
     operator_alert_slack_webhook_url: str = ""
     operator_alert_discord_webhook_url: str = ""

@@ -201,6 +201,7 @@ OPERATOR_ALERT_WEBHOOK_URL=
 OPERATOR_ALERT_TELEGRAM_BOT_TOKEN=
 OPERATOR_ALERT_TELEGRAM_CHAT_ID=
 OPERATOR_ALERT_TELEGRAM_POLL_ENABLED=true
+OPERATOR_ALERT_TELEGRAM_POLL_INTERVAL_SECONDS=15
 OPERATOR_ALERT_TELEGRAM_OFFSET_PATH=/app/state/runtime/telegram-update-offset.txt
 OPERATOR_ALERT_SLACK_WEBHOOK_URL=
 OPERATOR_ALERT_DISCORD_WEBHOOK_URL=
@@ -242,12 +243,13 @@ Notes:
 - `ALPACA_BASE_URL` must point to Alpaca's real-money endpoint before the live deployment checklist can go fully green. The app now blocks `BROKER_MODE=live` if it still points at `paper-api.alpaca.markets`.
 - `OPERATOR_ALERT_TRANSPORT` supports `telegram`, `webhook`, `slack`, `discord`, `whatsapp_bridge`, and `signal_bridge`.
 - Telegram is the simplest direct chat option and uses `OPERATOR_ALERT_TELEGRAM_BOT_TOKEN` plus `OPERATOR_ALERT_TELEGRAM_CHAT_ID`.
-- `OPERATOR_ALERT_TELEGRAM_POLL_ENABLED=true` lets the worker answer lightweight Telegram commands such as `/status` and `/testalert`.
+- `OPERATOR_ALERT_TELEGRAM_POLL_ENABLED=true` lets the worker answer lightweight Telegram commands such as `/ping`, `/status`, `/lasterror`, and `/testalert`.
+- `OPERATOR_ALERT_TELEGRAM_POLL_INTERVAL_SECONDS` decouples Telegram responsiveness from the heavier engine cycle. Keep it low, such as `10` to `15`, if you want the bot to feel alive.
 - `OPERATOR_ALERT_TELEGRAM_OFFSET_PATH` stores the last consumed Telegram update id so the bot does not keep reprocessing the same command after a restart.
 - `OPERATOR_ALERT_WEBHOOK_URL`, `OPERATOR_ALERT_SLACK_WEBHOOK_URL`, and `OPERATOR_ALERT_DISCORD_WEBHOOK_URL` let the VM send operator notifications to those destinations.
 - `OPERATOR_ALERT_WHATSAPP_BRIDGE_URL` and `OPERATOR_ALERT_SIGNAL_BRIDGE_URL` are intentionally bridge-style placeholders for public-repo use. They assume you run your own approved gateway or bridge service rather than pretending Micro Trader can talk to WhatsApp or Signal natively.
 - `OPERATOR_ALERT_EVENTS` now covers `worker_failure`, `trade_fill`, `trade_rejection`, `heartbeat_lag`, `heartbeat_recovered`, `stale_quotes`, and `reconciliation_drift`.
-- When Telegram is active, the dashboard and live monitor expose a `Send test alert` action and the bot can answer `/status`, `/testalert`, and `/help`.
+- When Telegram is active, the dashboard and live monitor expose a `Send test alert` action and the bot can answer `/ping`, `/status`, `/lasterror`, `/testalert`, and `/help`.
 - The dashboard and live monitor now also expose an `Execution Audit Board` so you can inspect runtime heartbeat, quote safety, reconciliation drift, and the recent execution timeline from one place.
 
 ### Operator alert transports

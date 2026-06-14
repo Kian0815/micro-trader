@@ -2730,7 +2730,7 @@ def _operator_alert_policy() -> dict:
         "stale quote protection -> telegram event stale_quotes",
         "reconciliation drift -> telegram event reconciliation_drift",
     ]
-    interactive_commands = ["/status", "/testalert", "/help"] if status.transport == "telegram" else []
+    interactive_commands = ["/ping", "/status", "/lasterror", "/testalert", "/help"] if status.transport == "telegram" else []
     return {
         "generated_at": datetime.utcnow(),
         "configured": status.configured,

@@ -1,6 +1,7 @@
 from pathlib import Path
 import logging
 import time
+from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
@@ -79,31 +80,133 @@ def _build_status_reply(settings) -> str:
     )
 
 
+def _build_ping_reply(settings) -> str:
+    with Session(engine) as db:
+        latest_engine_run = db.scalar(select(EngineRun).order_by(EngineRun.completed_at.desc()).limit(1))
+    if not latest_engine_run:
+        return "pong\nengine: no completed cycle yet"
+    return "\n".join(
+        [
+            "pong",
+            f"engine: {latest_engine_run.status}",
+            f"completed_at: {latest_engine_run.completed_at.isoformat(timespec='seconds')}",
+            f"broker mode: {settings.broker_mode} / target: {settings.broker_execution_target}",
+        ]
+    )
+
+
+def _build_last_error_reply() -> str:
+    with Session(engine) as db:
+        latest_engine_error = db.scalar(
+            select(EngineRun).where(EngineRun.status == "error").order_by(EngineRun.completed_at.desc()).limit(1)
+        )
+        latest_failed_intent = db.scalar(
+            select(ExecutionIntent)
+            .options(joinedload(ExecutionIntent.asset))
+            .where(ExecutionIntent.status == ExecutionIntentStatus.FAILED)
+            .order_by(ExecutionIntent.updated_at.desc())
+            .limit(1)
+        )
+    candidates: list[tuple[datetime, str]] = []
+    if latest_engine_error:
+        candidates.append(
+            (
+                latest_engine_error.completed_at,
+                "\n".join(
+                    [
+                        "Latest operator error",
+                        "source: engine_run",
+                        f"at: {latest_engine_error.completed_at.isoformat(timespec='seconds')}",
+                        f"status: {latest_engine_error.status}",
+                        f"message: {latest_engine_error.message or 'Engine cycle failed without a saved message.'}",
+                    ]
+                ),
+            )
+        )
+    if latest_failed_intent:
+        asset_symbol = latest_failed_intent.asset.symbol if latest_failed_intent.asset else "unknown"
+        candidates.append(
+            (
+                latest_failed_intent.updated_at,
+                "\n".join(
+                    [
+                        "Latest operator error",
+                        "source: execution_intent",
+                        f"at: {latest_failed_intent.updated_at.isoformat(timespec='seconds')}",
+                        f"asset: {asset_symbol}",
+                        f"side: {latest_failed_intent.side.value}",
+                        f"mode: {latest_failed_intent.mode} / target: {latest_failed_intent.execution_target}",
+                        f"message: {latest_failed_intent.error_message or latest_failed_intent.reason}",
+                    ]
+                ),
+            )
+        )
+    if not candidates:
+        return "Latest operator error\nnone recorded yet"
+    happened_at, message = max(candidates, key=lambda item: item[0])
+    age_seconds = max(int((datetime.utcnow() - happened_at).total_seconds()), 0)
+    age_hours = round(age_seconds / 3600, 1)
+    if age_seconds >= 86400:
+        age_days = round(age_seconds / 86400, 1)
+        prefix = (
+            "Latest operator error\n"
+            f"stale historical error: {age_days} day(s) old\n"
+            "no newer operator error has been recorded in the last 24h\n"
+        )
+        return prefix + message.removeprefix("Latest operator error\n")
+    prefix = (
+        "Latest operator error\n"
+        f"recent error: {age_hours} hour(s) old\n"
+    )
+    return prefix + message.removeprefix("Latest operator error\n")
+
+
 def _reply_to_telegram_command(settings, operator_alerts, command: str, chat_id: str) -> None:
     normalized = command.split()[0].split("@")[0].lower()
+    logger.info("Processing Telegram command %s for chat %s", normalized, chat_id)
     if normalized in {"/start", "/help"}:
-        operator_alerts.send_message(
+        sent = operator_alerts.send_message(
             "Micro Trader operator bot is live.\n"
             "Commands:\n"
+            "/ping - lightweight worker heartbeat\n"
             "/status - current operator snapshot\n"
+            "/lasterror - latest worker or execution failure\n"
             "/testalert - send a direct bot-path test reply\n"
             "/help - show this help",
             chat_id=chat_id,
         )
+        if not sent:
+            logger.warning("Telegram reply failed for %s to chat %s", normalized, chat_id)
+        return
+    if normalized == "/ping":
+        sent = operator_alerts.send_message(_build_ping_reply(settings), chat_id=chat_id)
+        if not sent:
+            logger.warning("Telegram reply failed for %s to chat %s", normalized, chat_id)
         return
     if normalized == "/status":
-        operator_alerts.send_message(_build_status_reply(settings), chat_id=chat_id)
+        sent = operator_alerts.send_message(_build_status_reply(settings), chat_id=chat_id)
+        if not sent:
+            logger.warning("Telegram reply failed for %s to chat %s", normalized, chat_id)
+        return
+    if normalized == "/lasterror":
+        sent = operator_alerts.send_message(_build_last_error_reply(), chat_id=chat_id)
+        if not sent:
+            logger.warning("Telegram reply failed for %s to chat %s", normalized, chat_id)
         return
     if normalized == "/testalert":
-        operator_alerts.send_message(
+        sent = operator_alerts.send_message(
             "Micro Trader Telegram command path is working from the VM.",
             chat_id=chat_id,
         )
+        if not sent:
+            logger.warning("Telegram reply failed for %s to chat %s", normalized, chat_id)
         return
-    operator_alerts.send_message(
-        "Unknown command. Try /status, /testalert, or /help.",
+    sent = operator_alerts.send_message(
+        "Unknown command. Try /ping, /status, /lasterror, /testalert, or /help.",
         chat_id=chat_id,
     )
+    if not sent:
+        logger.warning("Telegram reply failed for %s to chat %s", normalized, chat_id)
 
 
 def _process_telegram_commands(settings, operator_alerts) -> None:
@@ -124,6 +227,7 @@ def _process_telegram_commands(settings, operator_alerts) -> None:
     updates = operator_alerts.fetch_telegram_updates(offset=last_offset + 1, limit=25)
     if not updates:
         return
+    logger.info("Fetched %s Telegram update(s) starting at offset %s", len(updates), last_offset + 1)
     latest_seen = last_offset
     for update in updates:
         update_id = int(update.get("update_id", 0))
@@ -134,9 +238,11 @@ def _process_telegram_commands(settings, operator_alerts) -> None:
         if not text.startswith("/") or not chat_id:
             continue
         if settings.operator_alert_telegram_chat_id and chat_id != settings.operator_alert_telegram_chat_id:
+            logger.info("Ignoring Telegram command from unauthorized chat %s", chat_id)
             continue
         _reply_to_telegram_command(settings, operator_alerts, text, chat_id)
     _store_telegram_offset(settings, latest_seen)
+    logger.info("Stored Telegram offset %s", latest_seen)
 
 
 def main() -> None:
@@ -148,40 +254,53 @@ def main() -> None:
     ensure_simulation_schema()
     ensure_provider_health_schema()
     ensure_state_event_schema()
+    next_engine_run_at = 0.0
+    next_telegram_poll_at = 0.0
+    telegram_poll_interval = max(5, settings.operator_alert_telegram_poll_interval_seconds)
     while True:
-        try:
-            with Session(engine) as db:
-                seed_assets(db, settings.watchlist, settings.etf_watchlist, settings.stock_watchlist)
-                result = run_engine_cycle(db, settings)
-                logger.info("Engine cycle complete: %s", result)
-        except Exception:
-            logger.exception("Engine cycle failed")
-            operator_alerts.emit(
-                event_type="worker_failure",
-                severity="danger",
-                title="Worker cycle failed",
-                message="Micro Trader worker cycle failed. Check VM logs and the latest engine run traceback immediately.",
-                details={
-                    "mode": settings.broker_mode,
-                    "execution_target": settings.broker_execution_target,
-                },
-            )
-            with Session(engine) as db:
-                db.add(
-                    EngineRun(
-                        status="error",
-                        assets_count=0,
-                        news_items_count=0,
-                        signals_count=0,
-                        message="Engine cycle failed. Check worker logs for traceback.",
-                    )
+        now = time.monotonic()
+        if now >= next_engine_run_at:
+            try:
+                with Session(engine) as db:
+                    seed_assets(db, settings.watchlist, settings.etf_watchlist, settings.stock_watchlist)
+                    result = run_engine_cycle(db, settings)
+                    logger.info("Engine cycle complete: %s", result)
+            except Exception:
+                logger.exception("Engine cycle failed")
+                operator_alerts.emit(
+                    event_type="worker_failure",
+                    severity="danger",
+                    title="Worker cycle failed",
+                    message="Micro Trader worker cycle failed. Check VM logs and the latest engine run traceback immediately.",
+                    details={
+                        "mode": settings.broker_mode,
+                        "execution_target": settings.broker_execution_target,
+                    },
                 )
-                db.commit()
-        try:
-            _process_telegram_commands(settings, operator_alerts)
-        except Exception:
-            logger.exception("Telegram operator command poll failed")
-        time.sleep(settings.worker_interval_seconds)
+                with Session(engine) as db:
+                    db.add(
+                        EngineRun(
+                            status="error",
+                            assets_count=0,
+                            news_items_count=0,
+                            signals_count=0,
+                            message="Engine cycle failed. Check worker logs for traceback.",
+                        )
+                    )
+                    db.commit()
+            next_engine_run_at = time.monotonic() + settings.worker_interval_seconds
+        now = time.monotonic()
+        if now >= next_telegram_poll_at:
+            try:
+                _process_telegram_commands(settings, operator_alerts)
+            except Exception:
+                logger.exception("Telegram operator command poll failed")
+            next_telegram_poll_at = time.monotonic() + telegram_poll_interval
+        sleep_for = min(
+            max(0.5, next_engine_run_at - time.monotonic()),
+            max(0.5, next_telegram_poll_at - time.monotonic()),
+        )
+        time.sleep(sleep_for)
 
 
 if __name__ == "__main__":

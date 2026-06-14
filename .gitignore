@@ -1,4 +1,6 @@
 .venv/
+.venv312/
+.venv314/
 __pycache__/
 .pytest_cache/
 .mypy_cache/
@@ -10,3 +12,4 @@ backups/
 state/
 build/
 micro_trader.egg-info/
+micro_trader.db
