@@ -114,7 +114,6 @@ class WalkForwardAnalysisService:
                 SignalOutcomeSnapshot.horizon_hours.in_((4, 24)),
             )
             .order_by(SignalOutcomeSnapshot.updated_at.desc())
-            .limit(5000)
         ).all()
         live_observations = self._compress_live_observations(
             observation
