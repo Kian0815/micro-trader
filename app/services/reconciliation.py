@@ -82,6 +82,8 @@ class ReconciliationService:
             .limit(50)
         ).all()
         for intent in broker_target_intents:
+            if intent.status in {ExecutionIntentStatus.SKIPPED, ExecutionIntentStatus.FAILED} and not intent.broker_order_id:
+                continue
             if intent.broker_order_id and intent.status == ExecutionIntentStatus.FILLED:
                 continue
             if intent.intent_key not in broker_orders_by_client:
