@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     operator_alert_telegram_poll_enabled: bool = True
     operator_alert_telegram_poll_interval_seconds: int = 15
     operator_alert_telegram_offset_path: str = "/app/state/runtime/telegram-update-offset.txt"
+    operator_alert_digest_timezone: str = "Europe/Rome"
+    operator_alert_daily_summary_enabled: bool = True
+    operator_alert_daily_summary_hour_local: int = 9
+    operator_alert_daily_summary_state_path: str = "/app/state/runtime/operator-daily-summary.json"
+    operator_alert_strategy_state_path: str = "/app/state/runtime/operator-strategy-state.json"
     operator_alert_slack_webhook_url: str = ""
     operator_alert_discord_webhook_url: str = ""
     operator_alert_whatsapp_bridge_url: str = ""
