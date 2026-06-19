@@ -24,6 +24,7 @@ def run_engine_cycle(db: Session, settings: Settings) -> dict[str, int]:
     started_at = datetime.utcnow()
     latest_previous_engine_run = db.scalar(select(EngineRun).order_by(EngineRun.completed_at.desc()).limit(1))
     assets = db.scalars(select(Asset).where(Asset.is_active.is_(True))).all()
+    assets = _select_runtime_assets(settings, assets)
 
     market_service = MarketDataRouter(
         alphavantage_api_key=settings.alphavantage_api_key,
@@ -44,8 +45,18 @@ def run_engine_cycle(db: Session, settings: Settings) -> dict[str, int]:
         min_momentum_score_to_buy=settings.min_momentum_score_to_buy,
         min_news_items_to_buy=settings.min_news_items_to_buy,
     )
-    proof_service = StrategyProofService(strategy_engine)
-    walkforward_service = WalkForwardAnalysisService(strategy_engine)
+    proof_service = StrategyProofService(
+        strategy_engine,
+        stop_loss_pct=settings.stop_loss_pct,
+        take_profit_pct=settings.take_profit_pct,
+        trailing_stop_pct=settings.trailing_stop_pct,
+    )
+    walkforward_service = WalkForwardAnalysisService(
+        strategy_engine,
+        stop_loss_pct=settings.stop_loss_pct,
+        take_profit_pct=settings.take_profit_pct,
+        trailing_stop_pct=settings.trailing_stop_pct,
+    )
     risk_engine = RiskEngine(
         starting_capital_eur=settings.starting_capital_eur,
         reserve_cash_eur=settings.reserve_cash_eur,
@@ -119,6 +130,12 @@ def run_engine_cycle(db: Session, settings: Settings) -> dict[str, int]:
         walkforward_report=walkforward_report,
         active_simulation=simulation_service.get_active(db),
     )
+    _record_setup_approval_alerts(
+        db,
+        event_service=event_service,
+        operator_alerts=operator_alerts,
+        walkforward_report=walkforward_report,
+    )
     reconciliation_snapshot = reconciliation_service.record_snapshot(db)
     _record_heartbeat_alerts(
         db,
@@ -161,6 +178,69 @@ def run_engine_cycle(db: Session, settings: Settings) -> dict[str, int]:
     )
     db.commit()
     return result
+
+
+def _select_runtime_assets(settings: Settings, assets: list[Asset]) -> list[Asset]:
+    if not settings.proof_focus_enabled:
+        return assets
+
+    focused_assets = [asset for asset in assets if asset.kind.value in settings.proof_focus_asset_kinds]
+    if settings.proof_focus_symbols:
+        focused_assets = [asset for asset in focused_assets if asset.symbol.upper() in settings.proof_focus_symbols]
+
+    return focused_assets or assets
+
+
+def _record_setup_approval_alerts(
+    db: Session,
+    *,
+    event_service: StateEventService,
+    operator_alerts,
+    walkforward_report,
+) -> None:
+    """Flag when an entry lane first clears the (honest) approval gate.
+
+    Records an in-app state event every time the approved-lane set changes, and
+    additionally pushes an operator alert (e.g. Telegram) when the set becomes
+    non-empty. The operator-alert send is gated by OPERATOR_ALERT_EVENTS and is a
+    no-op unless `setup_approved` is enabled there.
+    """
+    approved_lanes = sorted(
+        f"{row.asset_kind}:{row.setup_type}"
+        for row in walkforward_report.rows
+        if row.recommendation == "approved"
+    )
+    fingerprint = "|".join(approved_lanes) if approved_lanes else "none"
+    event = event_service.record_change(
+        db,
+        event_key="setup-approval-alert",
+        category="proof",
+        severity="ok" if approved_lanes else "warn",
+        title=(
+            f"{len(approved_lanes)} setup lane(s) cleared the approval gate"
+            if approved_lanes
+            else "No setup lane is approved yet"
+        ),
+        message=(
+            "Approved lanes: " + ", ".join(approved_lanes) + ". "
+            "These cleared realized-exit expectancy across multiple independent sessions."
+            if approved_lanes
+            else "No entry lane currently clears the honest approval gate."
+        ),
+        fingerprint=fingerprint,
+    )
+    if event and approved_lanes:
+        operator_alerts.emit(
+            event_type="setup_approved",
+            severity="ok",
+            title=f"Micro Trader: {len(approved_lanes)} lane(s) now APPROVED",
+            message=(
+                "Approved: " + ", ".join(approved_lanes) + ". "
+                "Cleared the honest harness (realized exits + multiple independent sessions). "
+                "Stage 0 milestone — review before considering anything live."
+            ),
+            details={"approved_lanes": approved_lanes},
+        )
 
 
 def _record_heartbeat_alerts(

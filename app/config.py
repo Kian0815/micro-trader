@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     operator_alert_daily_summary_hour_local: int = 9
     operator_alert_daily_summary_state_path: str = "/app/state/runtime/operator-daily-summary.json"
     operator_alert_strategy_state_path: str = "/app/state/runtime/operator-strategy-state.json"
+    proof_focus_enabled: bool = False
+    proof_focus_asset_kinds_raw: str = Field(default="etf", alias="PROOF_FOCUS_ASSET_KINDS")
+    proof_focus_setup_type: str = "etf_trend"
+    proof_focus_symbols_raw: str = Field(default="QQQ,SPY", alias="PROOF_FOCUS_SYMBOLS")
+    market_hours_worker_interval_seconds: int = 120
+    off_hours_worker_interval_seconds: int = 300
     operator_alert_slack_webhook_url: str = ""
     operator_alert_discord_webhook_url: str = ""
     operator_alert_whatsapp_bridge_url: str = ""
@@ -168,6 +174,7 @@ class Settings(BaseSettings):
             "heartbeat_recovered",
             "stale_quotes",
             "reconciliation_drift",
+            "setup_approved",
         }
         parsed = {item.strip().lower() for item in self.operator_alert_events_raw.split(",") if item.strip()}
         filtered = parsed & allowed
@@ -179,11 +186,20 @@ class Settings(BaseSettings):
             "heartbeat_recovered",
             "stale_quotes",
             "reconciliation_drift",
+            "setup_approved",
         }
 
     @property
     def live_allowed_symbols(self) -> set[str]:
         return {item.strip().upper() for item in self.live_allowed_symbols_raw.split(",") if item.strip()}
+
+    @property
+    def proof_focus_asset_kinds(self) -> set[str]:
+        return self._parse_asset_kinds(self.proof_focus_asset_kinds_raw)
+
+    @property
+    def proof_focus_symbols(self) -> set[str]:
+        return {item.strip().upper() for item in self.proof_focus_symbols_raw.split(",") if item.strip()}
 
     @property
     def alpaca_endpoint_is_paper(self) -> bool:

@@ -75,6 +75,22 @@ def _safe_local_now(settings) -> datetime:
         return datetime.utcnow()
 
 
+def _is_us_equity_session_open() -> bool:
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    if now_et.weekday() >= 5:
+        return False
+    open_time = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+    close_time = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
+    return open_time <= now_et <= close_time
+
+
+def _effective_worker_interval_seconds(settings) -> int:
+    focused_equities = bool(settings.proof_focus_enabled and settings.proof_focus_asset_kinds & {"etf", "stock"})
+    if focused_equities and _is_us_equity_session_open():
+        return max(30, settings.market_hours_worker_interval_seconds)
+    return max(60, settings.off_hours_worker_interval_seconds or settings.worker_interval_seconds)
+
+
 def _operator_snapshot(settings) -> dict:
     import app.main as app_main
 
@@ -155,6 +171,12 @@ def _build_daily_summary_message(settings) -> str:
             "Micro Trader daily summary",
             f"local time: {local_now.strftime('%Y-%m-%d %H:%M %Z')}",
             f"readiness: {launch['overall_state']} ({launch['current_tier']})",
+            (
+                f"proof focus: {settings.proof_focus_setup_type} on "
+                f"{', '.join(sorted(settings.proof_focus_symbols))}"
+                if settings.proof_focus_enabled and settings.proof_focus_symbols
+                else "proof focus: off"
+            ),
             f"approved gates: {launch['approved_gates']} / watch: {launch['watch_gates']} / blocked: {launch['blocked_gates']}",
             f"open positions: {snapshot['open_positions']}",
             f"pending intents: {snapshot['pending_intents']} / failed intents: {snapshot['failed_intents']}",
@@ -556,7 +578,7 @@ def main() -> None:
                         )
                     )
                     db.commit()
-            next_engine_run_at = time.monotonic() + settings.worker_interval_seconds
+            next_engine_run_at = time.monotonic() + _effective_worker_interval_seconds(settings)
         now = time.monotonic()
         if now >= next_telegram_poll_at:
             try:
